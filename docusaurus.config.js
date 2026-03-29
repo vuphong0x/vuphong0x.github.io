@@ -17,10 +17,15 @@ const config = {
   organizationName: 'vuphong0x',
   projectName: 'vuphong0x.github.io',
   deploymentBranch: 'gh-pages',
-  trailingSlash: false,
 
   onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+
+  markdown: {
+    format: 'detect',
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
 
   i18n: {
     defaultLocale: 'en',
