@@ -1,0 +1,11 @@
+{
+  "position": 7,
+  "label": "Testing",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Testing",
+    "description": "Testing strategies — JUnit, UI Testing, and MockK."
+  }
+}

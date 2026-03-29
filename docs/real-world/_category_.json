@@ -1,0 +1,11 @@
+{
+  "position": 8,
+  "label": "Real World",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Real World",
+    "description": "Real-world engineering practices — CI/CD, Analytics, and Legacy Code."
+  }
+}

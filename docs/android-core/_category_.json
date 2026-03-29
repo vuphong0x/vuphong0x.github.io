@@ -1,0 +1,11 @@
+{
+  "position": 2,
+  "label": "Android Core",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Android Core",
+    "description": "Core Android components — Activities, Fragments, Lifecycle, Intents, and Permissions."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "position": 6,
+  "label": "Performance",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Performance",
+    "description": "Performance optimization — Memory management, Startup time, and Profiling."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "position": 3,
+  "label": "Architecture",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Architecture",
+    "description": "Architectural patterns and best practices — MVVM, Clean Architecture, Modularization."
+  }
+}

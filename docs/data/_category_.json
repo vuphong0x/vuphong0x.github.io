@@ -1,0 +1,11 @@
+{
+  "position": 5,
+  "label": "Data Layer",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Data Layer",
+    "description": "Data persistence and networking — Room, DataStore, Retrofit, and Paging."
+  }
+}

@@ -1,0 +1,281 @@
+/**
+ * Android Knowledge Hub — Custom Theme
+ * Built on Infima CSS framework (Docusaurus default)
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Light Mode ── */
+:root {
+  /* Android Green palette */
+  --ifm-color-primary: #1b9c5a;
+  --ifm-color-primary-dark: #188d51;
+  --ifm-color-primary-darker: #16854d;
+  --ifm-color-primary-darkest: #126e3f;
+  --ifm-color-primary-light: #1eab63;
+  --ifm-color-primary-lighter: #20b367;
+  --ifm-color-primary-lightest: #25ca74;
+
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --ifm-code-font-size: 90%;
+  --ifm-heading-font-weight: 700;
+
+  --ifm-navbar-height: 64px;
+  --ifm-navbar-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06);
+
+  --docusaurus-highlighted-code-line-bg: rgba(27, 156, 90, 0.1);
+
+  /* Custom tokens */
+  --ak-bg-gradient-start: #f8faf9;
+  --ak-bg-gradient-end: #eef5f1;
+  --ak-card-bg: #ffffff;
+  --ak-card-border: rgba(0, 0, 0, 0.06);
+  --ak-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --ak-text-muted: #5a6872;
+  --ak-hero-gradient: linear-gradient(135deg, #0a7e3d 0%, #1b9c5a 40%, #25ca74 100%);
+}
+
+/* ── Dark Mode ── */
+[data-theme='dark'] {
+  --ifm-color-primary: #3DDC84;
+  --ifm-color-primary-dark: #27d674;
+  --ifm-color-primary-darker: #21d06e;
+  --ifm-color-primary-darkest: #1bb65e;
+  --ifm-color-primary-light: #53e294;
+  --ifm-color-primary-lighter: #5de49a;
+  --ifm-color-primary-lightest: #80ebb2;
+
+  --ifm-background-color: #0d1117;
+  --ifm-background-surface-color: #161b22;
+  --ifm-navbar-background-color: #161b22;
+  --ifm-footer-background-color: #0d1117;
+
+  --docusaurus-highlighted-code-line-bg: rgba(61, 220, 132, 0.15);
+
+  --ak-bg-gradient-start: #0d1117;
+  --ak-bg-gradient-end: #111820;
+  --ak-card-bg: #161b22;
+  --ak-card-border: rgba(255, 255, 255, 0.08);
+  --ak-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+  --ak-text-muted: #8b949e;
+  --ak-hero-gradient: linear-gradient(135deg, #0d1117 0%, #112118 40%, #0d2818 100%);
+}
+
+/* ── Global ── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Navbar ── */
+.navbar {
+  backdrop-filter: saturate(180%) blur(12px);
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid var(--ak-card-border);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+[data-theme='dark'] .navbar {
+  background: rgba(22, 27, 34, 0.88);
+}
+
+.navbar__title {
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.navbar__link {
+  font-weight: 500;
+  font-size: 0.92rem;
+  transition: color 0.2s ease;
+}
+
+/* ── Sidebar ── */
+.menu__link {
+  font-size: 0.9rem;
+  font-weight: 450;
+  border-radius: 6px;
+  padding: 6px 10px;
+  transition: all 0.2s ease;
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+  background: rgba(27, 156, 90, 0.08);
+  font-weight: 600;
+}
+
+[data-theme='dark'] .menu__link--active:not(.menu__link--sublist) {
+  background: rgba(61, 220, 132, 0.1);
+}
+
+.menu__link:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme='dark'] .menu__link:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ── Article Content ── */
+.markdown h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.2rem;
+}
+
+.markdown h2 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-top: 2rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--ak-card-border);
+}
+
+.markdown h3 {
+  font-size: 1.15rem;
+  font-weight: 650;
+  margin-top: 1.5rem;
+}
+
+/* ── Code Blocks ── */
+.prism-code {
+  font-size: 0.875rem !important;
+  line-height: 1.65 !important;
+  border-radius: 8px !important;
+}
+
+div[class*='codeBlockContainer'] {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--ak-card-border);
+  box-shadow: var(--ak-card-shadow);
+  margin: 1rem 0;
+}
+
+div[class*='codeBlockTitle'] {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+code {
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.88em;
+}
+
+/* ── Admonitions ── */
+.admonition {
+  border-radius: 10px;
+  border-left-width: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* ── Table of Contents ── */
+.table-of-contents__link {
+  font-size: 0.85rem;
+  transition: color 0.2s ease;
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+}
+
+/* ── Last Updated ── */
+.theme-last-updated {
+  font-size: 0.82rem;
+  opacity: 0.7;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ak-card-border);
+}
+
+/* ── Footer ── */
+.footer {
+  border-top: 1px solid var(--ak-card-border);
+}
+
+.footer__title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.footer__link-item {
+  font-size: 0.88rem;
+  font-weight: 450;
+  transition: color 0.2s ease;
+}
+
+/* ── Search Bar ── */
+.navbar .DocSearch-Button {
+  border-radius: 8px;
+}
+
+/* ── Pagination ── */
+.pagination-nav__link {
+  border-radius: 10px;
+  border: 1px solid var(--ak-card-border);
+  transition: all 0.2s ease;
+}
+
+.pagination-nav__link:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 2px 8px rgba(27, 156, 90, 0.12);
+}
+
+/* ── Scrollbar (Webkit) ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ── Smooth transitions for dark/light toggle ── */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.navbar,
+.footer,
+.main-wrapper,
+.menu,
+.pagination-nav__link {
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ── Generated Index Cards ── */
+article.margin-top--lg {
+  border-radius: 10px;
+  border: 1px solid var(--ak-card-border);
+  padding: 1rem;
+  transition: all 0.2s ease;
+}
+
+article.margin-top--lg:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 4px 12px rgba(27, 156, 90, 0.08);
+  transform: translateY(-1px);
+}

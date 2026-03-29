@@ -1,0 +1,11 @@
+{
+  "position": 1,
+  "label": "Foundation",
+  "collapsible": true,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Foundation",
+    "description": "Core programming fundamentals — Kotlin, OOP, and essential concepts."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "position": 4,
+  "label": "UI",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "UI",
+    "description": "Android UI development — XML Views, Jetpack Compose, and Navigation."
+  }
+}
