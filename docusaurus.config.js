@@ -27,13 +27,6 @@ const config = {
     },
   },
 
-  scripts: [
-    {
-      src: 'https://unpkg.com/kotlin-playground@1',
-      data- selector: '.kotlin-code', // Nó sẽ biến các block này thành trình chạy code
-    },
-  ],
-
 i18n: {
   defaultLocale: 'en',
     locales: ['en'],
