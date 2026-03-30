@@ -1,5 +1,5 @@
 // @ts-check
-import {themes as prismThemes} from 'prism-react-renderer';
+import { themes as prismThemes } from 'prism-react-renderer';
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -27,23 +27,30 @@ const config = {
     },
   },
 
-  i18n: {
-    defaultLocale: 'en',
+  scripts: [
+    {
+      src: 'https://unpkg.com/kotlin-playground@1',
+      data- selector: '.kotlin-code', // Nó sẽ biến các block này thành trình chạy code
+    },
+  ],
+
+i18n: {
+  defaultLocale: 'en',
     locales: ['en'],
   },
 
-  themes: [
-    [
-      '@easyops-cn/docusaurus-search-local',
-      /** @type {import("@easyops-cn/docusaurus-search-local").PluginOptions} */
-      ({
-        hashed: true,
-        language: ['en'],
-        highlightSearchTermsOnTargetPage: true,
-        explicitSearchResultPath: true,
-      }),
-    ],
+themes: [
+  [
+    '@easyops-cn/docusaurus-search-local',
+    /** @type {import("@easyops-cn/docusaurus-search-local").PluginOptions} */
+    ({
+      hashed: true,
+      language: ['en'],
+      highlightSearchTermsOnTargetPage: true,
+      explicitSearchResultPath: true,
+    }),
   ],
+],
 
   presets: [
     [
@@ -51,6 +58,7 @@ const config = {
       /** @type {import('@docusaurus/preset-classic').Options} */
       ({
         docs: {
+          routeBasePath: '/',
           sidebarPath: './sidebars.js',
           showLastUpdateTime: true,
           showLastUpdateAuthor: false,
@@ -65,77 +73,77 @@ const config = {
     ],
   ],
 
-  themeConfig:
-    /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
-    ({
-      image: 'img/android-social-card.png',
-      colorMode: {
-        defaultMode: 'dark',
-        disableSwitch: false,
-        respectPrefersColorScheme: true,
+    themeConfig:
+/** @type {import('@docusaurus/preset-classic').ThemeConfig} */
+({
+  image: 'img/android-social-card.png',
+  colorMode: {
+    defaultMode: 'dark',
+    disableSwitch: false,
+    respectPrefersColorScheme: false,
+  },
+  navbar: {
+    title: 'Android Knowledge Hub',
+    logo: {
+      alt: 'Android Knowledge Hub',
+      src: 'img/logo.svg',
+    },
+    items: [
+      {
+        type: 'docSidebar',
+        sidebarId: 'knowledgeSidebar',
+        position: 'left',
+        label: '📚 Docs',
       },
-      navbar: {
-        title: 'Android Knowledge Hub',
-        logo: {
-          alt: 'Android Knowledge Hub',
-          src: 'img/logo.svg',
-        },
+      {
+        to: '/interview/',
+        label: '💬 Interview',
+        position: 'left',
+      },
+      {
+        href: 'https://github.com/vuphong0x',
+        label: 'GitHub',
+        position: 'right',
+      },
+    ],
+  },
+  footer: {
+    style: 'dark',
+    links: [
+      {
+        title: 'Knowledge',
+        items: [
+          { label: 'Getting Started', to: '/' },
+          { label: 'Kotlin', to: '/foundation/kotlin/' },
+          { label: 'Architecture', to: '/architecture/' },
+        ],
+      },
+      {
+        title: 'Quick Links',
+        items: [
+          { label: 'Interview Questions', to: '/interview/' },
+          { label: 'Performance', to: '/performance/' },
+          { label: 'Testing', to: '/testing/' },
+        ],
+      },
+      {
+        title: 'More',
         items: [
           {
-            type: 'docSidebar',
-            sidebarId: 'knowledgeSidebar',
-            position: 'left',
-            label: '📚 Docs',
-          },
-          {
-            to: '/docs/interview/',
-            label: '💬 Interview',
-            position: 'left',
-          },
-          {
-            href: 'https://github.com/vuphong0x',
             label: 'GitHub',
-            position: 'right',
+            href: 'https://github.com/vuphong0x',
           },
         ],
       },
-      footer: {
-        style: 'dark',
-        links: [
-          {
-            title: 'Knowledge',
-            items: [
-              {label: 'Getting Started', to: '/docs/'},
-              {label: 'Kotlin', to: '/docs/foundation/kotlin/'},
-              {label: 'Architecture', to: '/docs/architecture/'},
-            ],
-          },
-          {
-            title: 'Quick Links',
-            items: [
-              {label: 'Interview Questions', to: '/docs/interview/'},
-              {label: 'Performance', to: '/docs/performance/'},
-              {label: 'Testing', to: '/docs/testing/'},
-            ],
-          },
-          {
-            title: 'More',
-            items: [
-              {
-                label: 'GitHub',
-                href: 'https://github.com/vuphong0x',
-              },
-            ],
-          },
-        ],
-        copyright: `Copyright © ${new Date().getFullYear()} Android Knowledge Hub. Built with Docusaurus.`,
-      },
-      prism: {
-        theme: prismThemes.github,
-        darkTheme: prismThemes.dracula,
-        additionalLanguages: ['kotlin', 'groovy', 'java', 'bash', 'diff', 'json'],
-      },
-    }),
+    ],
+    copyright: `Copyright © ${new Date().getFullYear()} Android Knowledge Hub. Built with Docusaurus.`,
+  },
+  prism: {
+    theme: prismThemes.github,
+    darkTheme: prismThemes.dracula,
+    additionalLanguages: ['kotlin', 'groovy', 'java', 'bash', 'diff', 'json'],
+  },
+}),
 };
 
 export default config;
