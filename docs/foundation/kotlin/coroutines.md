@@ -1,4 +1,4 @@
-# **Kotlin Coroutines**
+# Kotlin Coroutines
 
 Coroutine là một concurrency design pattern để đơn giản hóa code xử lý bất đồng bộ (asynchronous).
 

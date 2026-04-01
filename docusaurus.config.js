@@ -129,7 +129,7 @@ themes: [
         ],
       },
     ],
-    copyright: `Copyright © ${new Date().getFullYear()} Android Knowledge Hub. Built with Docusaurus.`,
+    copyright: `Copyright © ${new Date().getFullYear()} Android Knowledge Hub. Built with PhongVV.`,
   },
   prism: {
     theme: prismThemes.github,

@@ -1,4 +1,4 @@
-# **Flows**
+# Flows
 
 Là một API thuộc Kotlin Coroutines dùng để xử lý stream dữ liệu bất đồng bộ (asynchronous data stream).
 

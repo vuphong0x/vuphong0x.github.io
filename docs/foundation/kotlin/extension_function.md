@@ -1,4 +1,4 @@
-# **Extensions function**
+# Extensions function
 
 Nó là cơ chế cho phép ta "thêm" phương thức mới vào một lớp đã tồn tại mà không cần kế thừa (inheritance) hay sử dụng Decorator pattern.
 
