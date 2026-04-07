@@ -1,6 +1,6 @@
 # Inline Function
 
-Inline function được sinh ra để giải quyết vấn đề: Khi truyền Lambda vào một Highger-order function, dưới góc nhìn của Java Bytecode, Kotlin sẽ tự động tạo ra một object (FunctionX) để chứa đoạn code lambda đó. Nếu hàm này được gọi liên tục (vd: trong một vòng lặp), hàng ngàn object rác sẽ được tạo ra, gây áp lực cho Garbage Collector (GC), dẫn đến giảm hiệu năng (Jank/Lag).
+Inline function được sinh ra để tối ưu hiệu suất khi sử dụng higher-order function nhận lambda làm tham số. Khi truyền Lambda vào một Higher-order function, dưới góc nhìn của Java Bytecode, Kotlin sẽ tự động tạo ra một object (FunctionX) để chứa đoạn code lambda đó. Nếu hàm này được gọi liên tục (vd: trong một vòng lặp), hàng ngàn object rác sẽ được tạo ra, gây áp lực cho Garbage Collector (GC), dẫn đến giảm hiệu năng (Jank/Lag).
 
 ### 1. `inline`&#x20;
 
