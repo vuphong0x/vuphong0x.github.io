@@ -41,6 +41,8 @@ themes: [
       language: ['en'],
       highlightSearchTermsOnTargetPage: true,
       explicitSearchResultPath: true,
+      docsRouteBasePath: '/',
+      indexBlog: false,
     }),
   ],
 ],
