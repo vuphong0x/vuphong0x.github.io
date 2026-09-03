@@ -96,6 +96,11 @@ themes: [
         position: 'left',
       },
       {
+        to: '/quiz',
+        label: '🎮 Quiz',
+        position: 'left',
+      },
+      {
         href: 'https://github.com/vuphong0x',
         label: 'GitHub',
         position: 'right',
