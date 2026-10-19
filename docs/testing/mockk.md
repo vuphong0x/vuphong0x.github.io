@@ -1,10 +1,10 @@
 # MockK
 
-MockK is the definitive mocking library built exclusively for Kotlin. Unlike older Java libraries like Mockito, MockK handles Kotlin's unique language traits—such as `final` classes by default, `object` singletons, extension functions, and `suspend` coroutines natively and effortlessly.
+MockK is a mocking library with Kotlin-oriented APIs. It provides APIs for stubbing/verifying Kotlin calls, including suspend functions; choose mocks or fakes according to the behavior under test.
 
 ## Defining Mocks
 
-A mocked object behaves as a totally blank shell of a class. You must dictate exactly what it should return when its methods are called, otherwise it crashes.
+Configure the behavior the test needs. Unstubbed calls on strict mocks can fail; relaxed mocks/default handling follow their configured rules. Prefer a fake when a small stateful implementation makes the behavior clearer.
 
 ### Annotations Setup
 ```kotlin
@@ -46,7 +46,7 @@ You use `verify { ... }` or `coVerify` to ensure a method was called exactly the
 verify(exactly = 1) { analyticsTracker.logEvent("Login_Success") }
 
 // Ensure another function was never called
-verify { userRepository.deleteUser(any()) wasNot Called }
+coVerify(exactly = 0) { userRepository.deleteUser(any()) }
 ```
 
 ### 2. Argument Capturing
@@ -66,7 +66,12 @@ MockK makes it incredibly easy to mock static constants, Kotlin `object` instanc
 ## Interview Questions
 
 **Q: In MockK, what is a `spyk` compared to a `mockk`?**
-*Answer:* A `mockk` is a true hollow shell; you must define the behavior of every method you intend to call. A `spyk` acts as a wrapper around a real, instantiated object. It will execute the *real* code of the object, unless you explicitly override a specific method on it using `every { ... }`. Spies are excellent for partial mocking.
+*Answer:* A `mockk` is a true hollow shell; unstubbed behavior depends on whether the mock is strict or relaxed. A `spyk` acts as a wrapper around a real, instantiated object. It will execute the *real* code of the object, unless you explicitly override a specific method on it using `every { ... }`. Spies are excellent for partial mocking.
 
 **Q: How do you handle mocking a suspend function?**
 *Answer:* Kotlin Coroutines suspend functions must be mocked and verified using the `coEvery { ... }`, `coVerify { ... }`, and `coAnswers { ... }` syntax counterparts provided natively by MockK.
+
+
+For suspend delete APIs use `coVerify`; for synchronous APIs use `verify`. Verify call count only when that interaction is part of the contract. See [test strategy](./test-strategy.md).
+
+Nguồn API: [MockK documentation](https://mockk.io/).

@@ -1,85 +1,73 @@
-# JUnit and Local Unit Testing
+---
+title: Unit test, scheduler và state transition
+---
 
-Unit Tests verify the behavior of the smallest unit of logic (e.g., a function, a UseCase, or a ViewModel). They run on the local JVM (your computer) and are exceptionally fast compared to instrumented UI tests.
+# Unit test có contract và lịch chạy rõ ràng
 
-## Why Unit Testing?
-1. Validates business logic securely.
-2. Prevents regressions when refactoring.
-3. Documents the intended behavior of a component.
+Local JVM tests phù hợp pure logic/state transformation không cần thiết bị. Khi code phụ thuộc Android API hoặc lifecycle, cần fake/abstraction, môi trường hỗ trợ hoặc instrumented test đúng boundary. Chọn runner JUnit theo toolchain/source set được hỗ trợ; không coi số phiên bản mới hơn tự giải quyết integration.
 
-## Best Practices (FIRST Principle)
-- **F**ast: Tests should run in milliseconds to encourage developers to run them often.
-- **I**solated/Independent: Tests should never depend on each other. One failing test shouldn't trigger a cascade of failures.
-- **R**epeatable: A test should produce the same result regardless of the environment (e.g., network conditions, timezone).
-- **S**elf-validating: The test either passes (green) or fails (red) purely automatically without manual log inspection.
-- **T**horough: Test edge cases, nulls, empty lists, exceptions, boundary limits.
+## 1. Arrange, Act, Assert
 
-## Setting Up JUnit 4/5
-In Android, JUnit 4 is the legacy standard, while JUnit 5 (Jupiter) is the modern standard.
+Arrange chuẩn bị input và dependency có thể kiểm soát; Act thực hiện hành động; Assert kiểm tra behavior theo contract. Đừng chỉ assert object không null sau khi chạy code. Chọn boundary case: rỗng, duplicate, lỗi dự kiến, cancellation và thứ tự cập nhật khi chúng ảnh hưởng sản phẩm.
 
-```kotlin
-// Basic JUnit 4 Example
-class CalculatorTest {
+## 2. Ví dụ ViewModel dùng Main dispatcher trong JVM test
 
-    private lateinit var calculator: Calculator
-
-    @Before
-    fun setUp() {
-        calculator = Calculator()
-    }
-
-    @Test
-    fun `when adding two positive numbers, then return correct sum`() {
-        // Arrange
-        val a = 5
-        val b = 3
-
-        // Act
-        val result = calculator.add(a, b)
-
-        // Assert
-        assertEquals(8, result)
-    }
-}
-```
-
-## Testing ViewModels and Coroutines
-
-Because Coroutines utilize specialized Dispatchers (like `Dispatchers.Main` which relies on the `android.os.Looper`), you will get crashes if you run ViewModel tests on a standard local JVM.
-
-**Solution:** Use `MainDispatcherRule` to swap the Main dispatcher for `UnconfinedTestDispatcher`.
+Ví dụ sau dùng JUnit4, `androidx.lifecycle` và `kotlinx-coroutines-test`. Main không có Android Looper trong JVM test, nên rule cài TestDispatcher và reset sau test.
 
 ```kotlin
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainDispatcherRule(
-    val testDispatcher: TestDispatcher = UnconfinedTestDispatcher()
+    val dispatcher: TestDispatcher = StandardTestDispatcher(),
 ) : TestWatcher() {
     override fun starting(description: Description) {
-        Dispatchers.setMain(testDispatcher)
+        Dispatchers.setMain(dispatcher)
     }
-
     override fun finished(description: Description) {
         Dispatchers.resetMain()
     }
 }
 
-class LoginViewModelTest {
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
+class CounterViewModel : ViewModel() {
+    private val _count = MutableStateFlow(0)
+    val count = _count.asStateFlow()
+
+    fun incrementLater() {
+        viewModelScope.launch {
+            delay(1_000)
+            _count.value += 1
+        }
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class CounterViewModelTest {
+    @get:Rule val main = MainDispatcherRule()
 
     @Test
-    fun `when login succeeds, state is updated to Success`() = runTest {
-        // Evaluate suspended code inside runTest to skip delays!
-        viewModel.login()
-        assertEquals(Success, viewModel.uiState.value)
+    fun incrementsAfterDelay() = runTest(main.dispatcher) {
+        val viewModel = CounterViewModel()
+        viewModel.incrementLater()
+        assertEquals(0, viewModel.count.value)
+        advanceUntilIdle()
+        assertEquals(1, viewModel.count.value)
     }
 }
 ```
 
-## Interview Questions
+Imports cần lấy từ JUnit, JUnit rules/runner và kotlinx.coroutines tương ứng. Không có infinite collector trong ví dụ; với ViewModel có job dài phải kết thúc owner/scope do test tạo. Test dùng cùng dispatcher/scheduler, không đo thời gian thật bằng sleep.
 
-**Q: Explain the AAA pattern in Unit Testing.**
-*Answer:* AAA stands for **Arrange** (set up objects, mocks, and initial state), **Act** (execute the specific method being tested), and **Assert** (verify the returned value or resulting state). Following this structure makes tests highly legible.
+## 3. runTest không điều khiển mọi thời gian
 
-**Q: What is `runTest` from the `kotlinx-coroutines-test` library, and why is it superior to `runBlocking`?**
-*Answer:* `runTest` is designed specifically for testing hanging suspend functions. It automatically skips delays (`delay(5000)` executes instantaneously). `runBlocking` actually blocks the underlying thread and waits the full real 5 seconds, making your test suites unacceptably slow.
+Delay trong code chạy trên TestDispatcher dùng cùng scheduler có thể được tiến bằng virtual time. Code hardcode IO/Default thật hoặc gọi clock/network thật không tự chuyển sang scheduler đó. `advanceUntilIdle()` không phải “đợi toàn bộ ứng dụng xong” cho mọi nguồn async.
+
+Với stateIn(WhileSubscribed), cần subscriber để upstream bắt đầu. Nếu contract cần xác nhận Loading trung gian, fake nên cho phép giữ request chưa hoàn tất; assert state cuối quá sớm có thể bỏ sót lỗi transition.
+
+## 4. Test behavior thay vì cấu trúc nội bộ
+
+Pure reducer nên test input/state/output. Repository integration nên kiểm tra mapping/error/cache contract. Mock interaction chỉ khi interaction là điều cần bảo vệ; đổi implementation mà behavior giữ nguyên không nên phá hàng chục test không cần thiết.
+
+Test pass không chứng minh mọi scenario ngoài phạm vi. Ghi rõ fixture/assumption, ví dụ currency unit, timezone, session identity và thiết bị/runtime khi chúng ảnh hưởng kết quả.
+
+Nguồn: [Local tests](https://developer.android.com/training/testing/local-tests), [Testing coroutines](https://developer.android.com/kotlin/coroutines/test).
+
+Đọc tiếp: [Flow testing](./coroutines.md), [test strategy](./test-strategy.md), [UI testing](./ui-testing.md).

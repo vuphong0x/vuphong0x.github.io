@@ -39,4 +39,10 @@ Apps might be killed by the system to free up resources.
 *Answer:* A Fragment's instance might outlive its view (e.g., when it is in the back stack but not visible). If you keep a reference to the ViewBinding variable, the Views cannot be garbage collected, leading to a memory leak.
 
 **Q: What is the lifecycle order when navigating from Activity A to Activity B?**
-*Answer:* A.onPause() -> B.onCreate() -> B.onStart() -> B.onResume() -> A.onStop(). Activity A only drops to `onStop()` *after* B has completed its layout and rendered its first frame.
+*Answer:* A.onPause() -> B.onCreate() -> B.onStart() -> B.onResume() -> A.onStop(). In the usual full-screen transition, A reaches `onStop()` when it is no longer visible. Do not treat this callback sequence as a universal first-frame timing guarantee.
+
+For restoration limits and lifecycle-aware collection, see [State recovery](./state-recovery.md).
+
+## Đọc sâu và thực hành
+
+[Context và memory ownership](./context-memory.md) · [Flow theo lifecycle](../foundation/kotlin/flow-lifecycle.md).

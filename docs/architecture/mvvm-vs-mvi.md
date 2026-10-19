@@ -1,501 +1,121 @@
-# MVVM vs MVI — So sánh toàn diện
-
-Cả MVVM và MVI đều là kiến trúc **Presentation Layer** phổ biến trong Android. Hiểu rõ bản chất, ưu nhược điểm và khi nào dùng cái nào là yêu cầu bắt buộc của kỹ sư cấp Senior.
-
+---
+title: MVVM và MVI — state, reducer và concurrency
 ---
 
-## 1. MVVM (Model — View — ViewModel)
+# MVVM và MVI: so sánh trên cùng một bài toán
 
-### Luồng dữ liệu
+MVVM và MVI là những họ cách tổ chức presentation logic, có nhiều biến thể trong thực tế. ViewModel có thể expose immutable state và dùng reducer; một màn hình gọi là MVI vẫn có thể bị race condition hoặc mất event. Đánh giá implementation qua ownership, transition và failure semantics thay vì chỉ tên pattern.
 
+## 1. Những quyết định cần tách riêng
+
+| Quyết định | Các lựa chọn có thể dùng |
+| --- | --- |
+| UI gửi action bằng gì? | Method cụ thể, sealed action, callback |
+| State được tổ chức thế nào? | Một snapshot theo screen hoặc các state độc lập có contract rõ |
+| Transition ở đâu? | Method của state holder hoặc pure reducer |
+| Effect chạy thế nào? | Coroutine theo scope, executor/actor theo policy |
+| Kết quả quan trọng được giữ ở đâu? | State/persistence với identity và reconciliation |
+| Xử lý action đồng thời ra sao? | Ignore, queue, cancel-previous, latest-wins hoặc merge |
+
+Không có yêu cầu mọi MVI phải có một data class cho toàn ứng dụng. MVVM cũng không cấm state tổng hợp hoặc reducer thuần. Android architecture guidance tập trung UDF, state holder và separation of concerns; không phải một bảng xếp hạng pattern.
+
+Nguồn: [Architecture recommendations](https://developer.android.com/topic/architecture/recommendations).
+
+## 2. Cùng một tình huống: search trả kết quả sai thứ tự {#race}
+
+```text
+Query A → request A bắt đầu
+Query B → request B bắt đầu
+Response B về → hiển thị B
+Response A về chậm hơn → nếu ghi đè vô điều kiện, UI lại hiển thị A
 ```
-┌──────────────────────────────────────────────────────┐
-│                       VIEW                           │
-│  (Activity / Fragment / Composable)                  │
-│                                                      │
-│  Gửi event lên:  viewModel.onLoginClicked()          │
-│  Nhận state xuống: uiState.collect { render(it) }    │
-└────────────────────┬─────────────────────────────────┘
-                     │  Events ↑ / State ↓
-┌────────────────────▼─────────────────────────────────┐
-│                    VIEWMODEL                         │
-│                                                      │
-│  • Xử lý business logic của màn hình                 │
-│  • Phát ra StateFlow<UiState>                        │
-│  • Không biết gì về View                            │
-└────────────────────┬─────────────────────────────────┘
-                     │
-┌────────────────────▼─────────────────────────────────┐
-│                 MODEL / DATA LAYER                   │
-│  (Repository → Room, Retrofit, DataStore)            │
-└──────────────────────────────────────────────────────┘
-```
 
-### Cách implement chuẩn
+Một reducer không tự biết response nào thuộc query hiện tại. Cần identity/version và policy cho request cũ. Có thể cancel previous nếu API hợp tác, đồng thời kiểm tra identity để tránh stale result ở boundary cần thiết. Với side effect đã commit ở server, cancellation không đảo ngược thao tác đó.
+
+## 3. Reducer thuần với request version {#reducer}
+
+Ví dụ dùng List<String> để tập trung vào transition; caller phải truyền snapshot không bị mutate sau khi phát. Khi tích hợp, định nghĩa model item, loading/error UI và policy cache phù hợp.
 
 ```kotlin
-// ── State ──────────────────────────────────────────
-data class LoginUiState(
-    val email: String = "",
-    val password: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    val isLoggedIn: Boolean = false,
+sealed interface SearchPhase {
+    data object Idle : SearchPhase
+    data object Loading : SearchPhase
+    data object Ready : SearchPhase
+    data object Error : SearchPhase
+}
+
+data class SearchState(
+    val query: String = "",
+    val version: Long = 0,
+    val items: List<String> = emptyList(),
+    val phase: SearchPhase = SearchPhase.Idle,
 )
 
-// ── ViewModel ──────────────────────────────────────
-@HiltViewModel
-class LoginViewModel @Inject constructor(
-    private val loginUseCase: LoginUseCase,
-) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(LoginUiState())
-    val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
-
-    // One-shot events (navigation, snackbar)
-    private val _events = MutableSharedFlow<LoginEvent>(extraBufferCapacity = 1)
-    val events: SharedFlow<LoginEvent> = _events.asSharedFlow()
-
-    fun onEmailChanged(email: String) {
-        _uiState.update { it.copy(email = email) }
-    }
-
-    fun onPasswordChanged(password: String) {
-        _uiState.update { it.copy(password = password) }
-    }
-
-    fun onLoginClicked() {
-        val state = _uiState.value
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            loginUseCase(state.email, state.password)
-                .onSuccess {
-                    _events.emit(LoginEvent.NavigateToDashboard)
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, errorMessage = e.message) }
-                }
-        }
-    }
+sealed interface SearchAction {
+    data class QueryChanged(val query: String) : SearchAction
+    data object Submitted : SearchAction
+    data class Loaded(val version: Long, val items: List<String>) : SearchAction
+    data class Failed(val version: Long) : SearchAction
 }
 
-// ── View (Fragment) ────────────────────────────────
-viewLifecycleOwner.lifecycleScope.launch {
-    repeatOnLifecycle(Lifecycle.State.STARTED) {
-        launch { viewModel.uiState.collect { render(it) } }
-        launch { viewModel.events.collect { handleEvent(it) } }
-    }
+fun reduce(state: SearchState, action: SearchAction): SearchState = when (action) {
+    is SearchAction.QueryChanged -> state.copy(
+        query = action.query,
+        version = state.version + 1,
+        phase = SearchPhase.Idle,
+    )
+    SearchAction.Submitted -> state.copy(
+        version = state.version + 1,
+        phase = SearchPhase.Loading,
+    )
+    is SearchAction.Loaded -> if (action.version == state.version) {
+        state.copy(items = action.items, phase = SearchPhase.Ready)
+    } else state
+    is SearchAction.Failed -> if (action.version == state.version) {
+        state.copy(phase = SearchPhase.Error)
+    } else state
 }
 ```
 
----
+QueryChanged làm response của request cũ không còn hợp lệ, kể cả trước lần submit mới. Ví dụ giữ items cũ trong lúc sửa query; UI cần biểu diễn cached/stale content đúng hoặc xóa items nếu policy sản phẩm yêu cầu. Reducer là nơi công bố lựa chọn đó, không phải cơ chế tự quyết định UX.
 
-## 2. MVI (Model — View — Intent)
+## 4. Effect và action ordering {#effects}
 
-### Tư tưởng cốt lõi
+State holder serialize các action theo policy được chọn, áp reducer rồi bắt đầu effect ngoài reducer. Khi Submitted được chấp nhận, chụp query/version tương ứng và đưa version đó vào Loaded/Failed sau request. Không đọc `_state.value.query` sau await để đoán request vừa xong thuộc query nào.
 
-MVI đưa pattern **Redux** (từ web) vào Android. Mọi thay đổi UI đều phải đi qua một **Reducer** duy nhất — hàm thuần túy (pure function) nhận State cũ + Intent → trả về State mới.
+Reducer không gọi network, không đọc clock hệ thống, không log credential và không sinh random ID. Nếu dùng `MutableStateFlow.update`, lambda có thể được đánh giá lại khi concurrent update; pure transition tránh lặp side effect trong lambda đó. StateFlow APIs thread-safe không có nghĩa chuỗi nhiều thao tác đọc/ghi nghiệp vụ đã atomic.
 
-```
-                     ┌─────────────┐
-                     │    USER     │
-                     └──────┬──────┘
-                            │ action (click, swipe, input)
-                            ▼
-┌───────────────────────────────────────────────────────┐
-│                        VIEW                           │
-│  Render(state)                  Dispatch(intent)      │
-└───────┬──────────────────────────────────┬────────────┘
-        │ State ↓ (render)                 │ Intent ↑ (user action)
-        │                                  │
-┌───────▼──────────────────────────────────▼────────────┐
-│                      VIEWMODEL                        │
-│                                                       │
-│  ┌────────────┐    ┌───────────────┐   ┌───────────┐  │
-│  │   Intent   │───▶│    Reducer    │──▶│   State   │  │
-│  │  (Action)  │    │ (pure func)   │   │(immutable)│  │
-│  └────────────┘    └───────────────┘   └───────────┘  │
-│                           │                           │
-│                    ┌──────▼──────┐                    │
-│                    │  Side Effect│                    │
-│                    │(API call,   │                    │
-│                    │ navigation) │                    │
-│                    └─────────────┘                    │
-└───────────────────────────────────────────────────────┘
-```
+Ví dụ version bảo vệ stale response, nhưng không tự giới hạn request/băng thông. Debounce, cancel-previous hoặc queue là các quyết định riêng. Đồng bộ access khi caller đa luồng hoặc chỉ cho phép dispatch trên main thread theo contract rõ ràng.
 
-### Cách implement chuẩn
+Nguồn: [StateFlow](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-state-flow/), [structured concurrency](../foundation/kotlin/structured-concurrency.md).
 
-```kotlin
-// ── Intent (user action) ───────────────────────────
-sealed class LoginIntent {
-    data class EmailChanged(val email: String) : LoginIntent()
-    data class PasswordChanged(val password: String) : LoginIntent()
-    object LoginClicked : LoginIntent()
-    object ErrorDismissed : LoginIntent()
-}
+## 5. Kiểm tra reducer và effect ở hai boundary
 
-// ── State (immutable, single source of truth) ──────
-data class LoginState(
-    val email: String = "",
-    val password: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-)
-
-// ── Side Effect (one-shot event) ───────────────────
-sealed class LoginEffect {
-    object NavigateToDashboard : LoginEffect()
-    data class ShowSnackbar(val message: String) : LoginEffect()
-}
-
-// ── ViewModel ──────────────────────────────────────
-@HiltViewModel
-class LoginViewModel @Inject constructor(
-    private val loginUseCase: LoginUseCase,
-) : ViewModel() {
-
-    private val _state = MutableStateFlow(LoginState())
-    val state: StateFlow<LoginState> = _state.asStateFlow()
-
-    private val _effect = MutableSharedFlow<LoginEffect>(extraBufferCapacity = 1)
-    val effect: SharedFlow<LoginEffect> = _effect.asSharedFlow()
-
-    // Entry point duy nhất để xử lý mọi event từ UI
-    fun dispatch(intent: LoginIntent) {
-        _state.update { reduce(it, intent) }
-        handleSideEffect(intent)
-    }
-
-    // Reducer: pure function, không có side effect
-    private fun reduce(current: LoginState, intent: LoginIntent): LoginState {
-        return when (intent) {
-            is LoginIntent.EmailChanged    -> current.copy(email = intent.email)
-            is LoginIntent.PasswordChanged -> current.copy(password = intent.password)
-            is LoginIntent.LoginClicked    -> current.copy(isLoading = true, errorMessage = null)
-            is LoginIntent.ErrorDismissed  -> current.copy(errorMessage = null)
-        }
-    }
-
-    // Side Effects: API call, navigation — tách biệt hoàn toàn khỏi Reducer
-    private fun handleSideEffect(intent: LoginIntent) {
-        if (intent !is LoginIntent.LoginClicked) return
-        viewModelScope.launch {
-            loginUseCase(_state.value.email, _state.value.password)
-                .onSuccess {
-                    _state.update { it.copy(isLoading = false) }
-                    _effect.emit(LoginEffect.NavigateToDashboard)
-                }
-                .onFailure { e ->
-                    _state.update { it.copy(isLoading = false, errorMessage = e.message) }
-                }
-        }
-    }
-}
-
-// ── View (Fragment) ────────────────────────────────
-// Gửi intent
-binding.btnLogin.setOnClickListener {
-    viewModel.dispatch(LoginIntent.LoginClicked)
-}
-binding.etEmail.doOnTextChanged { text, _, _, _ ->
-    viewModel.dispatch(LoginIntent.EmailChanged(text.toString()))
-}
-
-// Nhận state
-viewLifecycleOwner.lifecycleScope.launch {
-    repeatOnLifecycle(Lifecycle.State.STARTED) {
-        launch { viewModel.state.collect { render(it) } }
-        launch { viewModel.effect.collect { handleEffect(it) } }
-    }
-}
-```
-
----
-
-## 3. So sánh chi tiết
-
-### Bảng so sánh tổng quan
-
-| Tiêu chí | MVVM | MVI |
-| :--- | :--- | :--- |
-| **Entry point xử lý event** | Nhiều hàm riêng biệt trên ViewModel | Một hàm `dispatch(intent)` duy nhất |
-| **State management** | Có thể phân tán (nhiều StateFlow) | Bắt buộc 1 `data class` duy nhất (immutable) |
-| **Luồng dữ liệu** | Unidirectional nhưng không enforce nghiêm | Unidirectional được enforce bởi kiến trúc |
-| **Debugging** | Khó trace khi có nhiều state riêng lẻ | Dễ trace: log sequence of Intent → State |
-| **Predictability** | Trung bình | Cao — cùng Intent + State → luôn cho cùng kết quả |
-| **Testability** | Tốt | Rất tốt — Reducer là pure function |
-| **Boilerplate** | Thấp – Vừa | Cao hơn MVVM |
-| **Learning curve** | Thấp — chuẩn Android chính thống | Cao hơn — cần hiểu Redux/Elm pattern |
-| **Phù hợp với Compose** | Rất tốt | Rất tốt |
-| **Google recommend** | ✅ Chính thức | Không chính thức, nhưng phổ biến |
-
----
-
-### So sánh về State
-
-**MVVM** — State có thể phân tán:
-```kotlin
-// Một số project MVVM không kỷ luật sẽ bị như này:
-class ProductViewModel : ViewModel() {
-    val products = MutableStateFlow<List<Product>>(emptyList())
-    val isLoading = MutableStateFlow(false)
-    val errorMessage = MutableStateFlow<String?>(null)
-    val selectedCategory = MutableStateFlow<Category?>(null)
-    // → Khó đồng bộ, dễ có inconsistent state
-}
-```
-
-**MVI** — Bắt buộc single state object:
-```kotlin
-// MVI enforce: tất cả state gộp làm một
-data class ProductState(
-    val products: List<Product> = emptyList(),
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    val selectedCategory: Category? = null,
-    // → Impossible để có inconsistent state
-)
-```
-
----
-
-### So sánh về Testability
-
-**MVVM Test:**
 ```kotlin
 @Test
-fun `login success should update isLoggedIn state`() = runTest {
-    // Arrange
-    val viewModel = LoginViewModel(fakeLoginUseCase)
-    val states = mutableListOf<LoginUiState>()
-    val job = launch { viewModel.uiState.toList(states) }
-
-    // Act
-    viewModel.onLoginClicked()
-
-    // Assert — phức tạp hơn vì phải handle multiple StateFlow
-    assertTrue(states.last().isLoggedIn)
-    job.cancel()
+fun staleResponseDoesNotReplaceCurrentItems() {
+    val current = SearchState(query = "B", version = 2, items = listOf("B result"))
+    val next = reduce(current, SearchAction.Loaded(version = 1, items = listOf("A result")))
+    assertEquals(current, next)
 }
 ```
 
-**MVI Test — Reducer là pure function, test cực đơn giản:**
-```kotlin
-@Test
-fun `LoginClicked intent should set isLoading to true`() {
-    val initialState = LoginState(email = "a@b.com", password = "123")
+Đây là JVM test dùng JUnit/assertions theo setup project. Nó chứng minh một transition cụ thể, không chứng minh API thật đã cancel. Test effect cần fake điều khiển thứ tự request A/B, failure và cancellation; test UI cần xác nhận state render và lifecycle collection đúng.
 
-    // Reducer là pure function — test không cần coroutine, không cần mock
-    val newState = reduce(initialState, LoginIntent.LoginClicked)
+Một snapshot chứa `isLoading=true` và `error!=null` vẫn có thể được tạo nếu model cho phép. Immutable data class giảm mutation ngoài ý muốn, không tự làm impossible states biến mất. Có thể dùng sealed state cho tổ hợp cần loại trừ hoặc enforce invariant trong transition.
 
-    assertTrue(newState.isLoading)
-    assertNull(newState.errorMessage)
-}
+## 6. Navigation và kết quả nghiệp vụ {#delivery}
 
-@Test
-fun `EmailChanged intent should update email`() {
-    val newState = reduce(LoginState(), LoginIntent.EmailChanged("user@gmail.com"))
-    assertEquals("user@gmail.com", newState.email)
-}
-```
+Channel/SharedFlow thường xuất hiện trong cả MVVM lẫn MVI, nhưng chúng không bảo đảm side effect được xử lý exactly-once qua cancellation hoặc process death. SharedFlow(replay=0) có thể mất event khi không có subscriber; Channel có thể chuyển phần tử rồi consumer bị hủy trước khi hoàn tất xử lý.
 
----
+Với checkout, giữ order/request ID và trạng thái xác nhận trong nguồn dữ liệu phù hợp, dựng UI từ đó. Acknowledgment/handling cần identity và semantics rõ ràng; replay một lần không thay thế persistence hoặc server reconciliation. Xem [UDF, state và event delivery](./ui-state-events.md).
 
-## 4. Ưu điểm & Nhược điểm
+## 7. Chọn cấu trúc theo chi phí và nhu cầu
 
-### MVVM
+Reducer/action rõ ràng có ích khi transition phức tạp, nhiều input và cần review/test tập trung. Với màn hình nhỏ, methods cụ thể và immutable screen state có thể đủ. Cả hai đều cần scope, state ownership và error policy đúng.
 
-**✅ Ưu điểm:**
-- **Ít boilerplate:** Không cần định nghĩa sealed class Intent cho mỗi action nhỏ
-- **Được Google chính thức recommend** — tích hợp tốt với Jetpack (ViewModel, LiveData, Hilt)
-- **Learning curve thấp** — dễ onboard thành viên mới
-- **Đủ tốt cho hầu hết ứng dụng** — không over-engineer cho app đơn giản
+Log/replay toàn bộ action không phải mặc định an toàn: action có thể chứa password/PII, clock/random và kết quả I/O không tự tái tạo từ user intents. Muốn time-travel debugging cần xác định dữ liệu được lưu, side effects nào không chạy lại và policy redaction.
 
-**❌ Nhược điểm:**
-- **Không enforce Unidirectional Flow** — developer không kỷ luật có thể update state từ nhiều nơi, gây inconsistent state
-- **State có thể phân tán** — khó track toàn bộ UI state tại một thời điểm
-- **Debugging khó hơn** — khi bug xảy ra, khó biết chuỗi thay đổi state là gì
+**Bài tập:** triển khai cùng screen bằng public methods và sealed actions. Giữ cùng test matrix: response sai thứ tự, double submit, cancel, rotation và UI STOPPED. So sánh độ dễ review/đổi behavior, không chỉ số class.
 
----
-
-### MVI
-
-**✅ Ưu điểm:**
-- **Predictable hoàn toàn** — `(State, Intent) → State` là deterministic
-- **Single source of truth bắt buộc** — không thể có inconsistent state
-- **Time-travel debugging** — có thể replay lại sequence Intent để tái hiện bug
-- **Testability cao nhất** — Reducer là pure function, test không cần mock complex
-- **Tách biệt rõ ràng** — Intent (user action) / Reducer (pure logic) / Side Effect (IO, navigation)
-
-**❌ Nhược điểm:**
-- **Boilerplate nhiều** — mỗi màn hình cần sealed class Intent, State, Effect
-- **Learning curve cao hơn** — cần hiểu Redux/Elm architecture
-- **Over-engineer** cho màn hình đơn giản (ví dụ: chỉ hiển thị thông tin, không có interaction phức tạp)
-- **State copy overhead** — mỗi thay đổi nhỏ tạo object State mới (immutable copy)
-
----
-
-## 5. Khi nào dùng cái nào?
-
-### Dùng MVVM khi:
-
-```
-✔ App có quy mô nhỏ đến trung bình
-✔ Team nhỏ, cần onboard nhanh
-✔ Màn hình không có quá nhiều trạng thái phức tạp
-✔ Deadline gấp, không có thời gian setup MVI framework
-✔ Tích hợp với codebase Android chuẩn (Google Architecture Samples)
-```
-
-**Ví dụ thực tế phù hợp MVVM:**
-- Màn hình Profile — hiển thị và edit thông tin user
-- Màn hình Settings — danh sách toggle đơn giản
-- Màn hình chi tiết sản phẩm — fetch data và display
-
----
-
-### Dùng MVI khi:
-
-```
-✔ Màn hình có nhiều state phức tạp, nhiều trạng thái đồng thời
-✔ Cần debug và reproduce bug production dễ dàng
-✔ Team có kinh nghiệm, chấp nhận boilerplate
-✔ Yêu cầu test coverage cao (tài chính, y tế)
-✔ Màn hình có nhiều user interaction xảy ra đồng thời
-```
-
-**Ví dụ thực tế phù hợp MVI:**
-- Màn hình thanh toán (Payment) — nhiều step, validate phức tạp
-- Màn hình Chat realtime — nhiều event song song (typing, receive, send, error)
-- Màn hình Dashboard phức tạp — filter, sort, search, pagination cùng lúc
-- Màn hình Form nhiều bước (multi-step wizard)
-
----
-
-## 6. Hybrid Approach — Thực tế được dùng nhiều nhất
-
-Trong thực tế, phần lớn team Senior không chọn hoàn toàn một trong hai, mà dùng **MVVM với State được tổ chức theo tinh thần MVI**:
-
-```kotlin
-// ─── Tinh thần MVI trong MVVM ─────────────────────
-// Giữ structure gọn hơn pure MVI nhưng predictable hơn plain MVVM
-
-@HiltViewModel
-class CheckoutViewModel @Inject constructor(
-    private val placeOrderUseCase: PlaceOrderUseCase,
-) : ViewModel() {
-
-    // Single immutable state — học từ MVI
-    private val _state = MutableStateFlow(CheckoutState())
-    val state: StateFlow<CheckoutState> = _state.asStateFlow()
-
-    // One-shot effects — tách biệt khỏi state
-    private val _effect = Channel<CheckoutEffect>(Channel.BUFFERED)
-    val effect = _effect.receiveAsFlow()
-
-    // Public API — linh hoạt như MVVM, không cần sealed class
-    fun selectAddress(address: Address) {
-        _state.update { it.copy(selectedAddress = address) }
-    }
-
-    fun onPlaceOrderClicked() {
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
-            placeOrderUseCase(_state.value)
-                .onSuccess { orderId ->
-                    _state.update { it.copy(isLoading = false) }
-                    _effect.send(CheckoutEffect.NavigateToOrderConfirm(orderId))
-                }
-                .onFailure { e ->
-                    _state.update { it.copy(isLoading = false, error = e.message) }
-                }
-        }
-    }
-}
-
-data class CheckoutState(
-    val selectedAddress: Address? = null,
-    val selectedPayment: PaymentMethod? = null,
-    val cartItems: List<CartItem> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-)
-
-sealed class CheckoutEffect {
-    data class NavigateToOrderConfirm(val orderId: String) : CheckoutEffect()
-    object ShowPaymentFailed : CheckoutEffect()
-}
-```
-
----
-
-## 7. Câu hỏi phỏng vấn Senior
-
-**Q: Tại sao MVI enforce immutable State lại quan trọng?**
-
-**Trả lời:** Immutable State đảm bảo:
-1. **Thread-safety:** StateFlow chỉ accept value assign từ main thread, không thể có race condition khi nhiều coroutine đọc State
-2. **Predictability:** State tại mọi thời điểm là snapshot hoàn chỉnh — không bị partial update
-3. **Easy diffing:** Compose và RecyclerView DiffUtil so sánh object equality hiệu quả hơn
-4. **Time-travel debug:** Có thể lưu lại sequence State để replay bug
-
----
-
-**Q: MVI Reducer phải là pure function — điều này có nghĩa gì và tại sao quan trọng?**
-
-**Trả lời:** Pure function là hàm:
-- **Deterministic:** Cùng input (State + Intent) luôn cho cùng output (State mới)
-- **Không có side effect:** Không gọi API, không emit Flow, không log, không đọc system time
-
-Quan trọng vì:
-- **Unit test không cần mock** — chỉ gọi `reduce(state, intent)` và assert kết quả
-- **Thread-safe** — có thể gọi từ bất kỳ thread nào
-- **Reproducible** — dễ viết snapshot test
-
-```kotlin
-// Test Reducer = 3 dòng, không cần mock, không cần coroutine
-@Test
-fun `reduce LoginClicked sets isLoading true`() {
-    val result = reduce(LoginState(), LoginIntent.LoginClicked)
-    assertTrue(result.isLoading)
-}
-```
-
----
-
-**Q: Trong MVI, Side Effects nên được xử lý ở đâu và tại sao?**
-
-**Trả lời:** Side effects (API call, navigation, show dialog) phải **tách biệt hoàn toàn khỏi Reducer**. Thực hiện trong ViewModel sau khi Reducer đã tính State mới:
-
-```kotlin
-fun dispatch(intent: LoginIntent) {
-    // 1. Reducer chạy trước — pure, synchronous
-    _state.update { reduce(it, intent) }
-
-    // 2. Side effect xử lý sau — có thể async, có thể fail
-    if (intent is LoginIntent.LoginClicked) {
-        triggerLoginApiCall()
-    }
-}
-```
-
-Tại sao tách biệt:
-- Giữ Reducer thuần túy, dễ test
-- Side effect có thể fail, retry — không muốn nó làm phức tạp Reducer
-- Side effect có thể trigger từ nhiều Intent khác nhau — tách biệt giúp reuse
-
----
-
-**Q: Một số team dùng `Channel<Effect>` thay vì `SharedFlow` cho side effects — khi nào nên dùng cái nào?**
-
-**Trả lời:**
-
-| | `Channel` | `SharedFlow(replay=0)` |
-|---|---|---|
-| **Delivery guarantee** | Đảm bảo effect được consume (buffered) | Có thể drop nếu không có collector |
-| **Multiple collectors** | Chỉ 1 collector nhận mỗi event | Mọi collector đều nhận |
-| **Khi UI không active** | Buffer, deliver khi UI active lại | Drop event |
-| **Phù hợp** | Navigation, show dialog (phải execute đúng 1 lần) | Broadcast event (toast cho nhiều component) |
-
-Trong thực tế: dùng `Channel(BUFFERED)` cho **one-shot effects** (navigation, snackbar), dùng `SharedFlow` khi nhiều component cần observe cùng event stream.
+Đọc tiếp: [MVVM](./mvvm.md), [Flow](../foundation/kotlin/flow-lifecycle.md), [test strategy](../testing/test-strategy.md), [security](../security/security-model.md#session).

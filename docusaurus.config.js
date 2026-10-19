@@ -4,7 +4,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Android Knowledge Hub',
-  tagline: 'Comprehensive Android development guide & interview prep',
+  tagline: 'Hiểu cơ chế, thiết kế có đánh đổi, kiểm chứng bằng thực hành',
   favicon: 'img/favicon.ico',
 
   future: {
@@ -18,18 +18,18 @@ const config = {
   projectName: 'vuphong0x.github.io',
   deploymentBranch: 'gh-pages',
 
-  onBrokenLinks: 'warn',
+  onBrokenLinks: 'throw',
 
   markdown: {
     format: 'detect',
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
 
 i18n: {
-  defaultLocale: 'en',
-    locales: ['en'],
+  defaultLocale: 'vi',
+    locales: ['vi'],
   },
 
 themes: [
@@ -38,7 +38,7 @@ themes: [
     /** @type {import("@easyops-cn/docusaurus-search-local").PluginOptions} */
     ({
       hashed: true,
-      language: ['en'],
+      language: ['en', 'vi'],
       highlightSearchTermsOnTargetPage: true,
       explicitSearchResultPath: true,
       docsRouteBasePath: '/',
@@ -71,7 +71,7 @@ themes: [
     themeConfig:
 /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
 ({
-  image: 'img/android-social-card.png',
+  image: 'img/docusaurus-social-card.jpg',
   colorMode: {
     defaultMode: 'dark',
     disableSwitch: false,
@@ -88,10 +88,15 @@ themes: [
         type: 'docSidebar',
         sidebarId: 'knowledgeSidebar',
         position: 'left',
-        label: '📚 Docs',
+        label: '📚 Tài liệu',
       },
       {
-        to: '/interview/',
+        to: '/interview/senior-android',
+        label: 'Lộ trình Senior',
+        position: 'left',
+      },
+      {
+        to: '/category/interview',
         label: '💬 Interview',
         position: 'left',
       },
@@ -114,16 +119,16 @@ themes: [
         title: 'Knowledge',
         items: [
           { label: 'Getting Started', to: '/' },
-          { label: 'Kotlin', to: '/foundation/kotlin/' },
-          { label: 'Architecture', to: '/architecture/' },
+          { label: 'Kotlin', to: '/category/kotlin' },
+          { label: 'Architecture', to: '/category/architecture' },
         ],
       },
       {
         title: 'Quick Links',
         items: [
-          { label: 'Interview Questions', to: '/interview/' },
-          { label: 'Performance', to: '/performance/' },
-          { label: 'Testing', to: '/testing/' },
+          { label: 'Interview Questions', to: '/category/interview' },
+          { label: 'Performance', to: '/category/performance' },
+          { label: 'Testing', to: '/category/testing' },
         ],
       },
       {

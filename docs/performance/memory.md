@@ -19,8 +19,8 @@ Passing an `Activity` context to a long-lived object (like a Singleton, ViewMode
 Never hold `View`, `Activity`, or `Fragment` references in `object` singletons or `companion objects`.
 
 ### 3. Inner Classes and Callbacks
-Anonymous inner classes (like traditional Java `Runnable` or `Retrofit Callback`) hold an implicit reference to their outer class.
-- **Fix:** Use static inner classes, or modern Kotlin standard Coroutines, which cancel securely using CoroutineScope.
+Non-static Java inner classes and callbacks/lambdas that capture an Activity or View can retain that UI after its intended lifetime.
+- **Fix:** Remove registrations and captured references at the correct lifecycle boundary. Coroutine cancellation helps only when ownership and cleanup are correctly implemented; a coroutine can still retain UI.
 
 ### 4. Unregistered Listeners
 If you register a listener (e.g., `LocationManager`, `SensorManager`, `BroadcastReceiver`) in `onCreate()` or `onStart()`, you *must* unregister it in the symmetrical teardown method (`onDestroy()` or `onStop()`).
@@ -40,7 +40,11 @@ Bitmaps are enormous. A single 12MP photo can consume 48MB of raw RAM if loaded 
 ## Interview Questions
 
 **Q: Explain why `LeakCanary` only runs in Debug builds.**
-*Answer:* `LeakCanary` intentionally induces Garbage Collection and performs Heap Dumps. A Heap Dump literally pauses the entire application thread for several seconds while it copies active memory to disk. This ruins the user experience and represents a massive security flaw, so it must rigorously be kept out of `release` builds.
+*Answer:* `LeakCanary` intentionally induces Garbage Collection and performs Heap Dumps. A Heap Dump literally pauses the entire application thread for several seconds while it copies active memory to disk. Heap analysis adds overhead and dumps can contain application data, so the normal integration is a debug-only dependency.
 
 **Q: How does a closure handle external references in a Coroutine?**
-*Answer:* A lambda sent into a coroutine captures its surrounding environment. If you reference `this` inside a View or Activity scope, the Coroutine holds the Activity alive. This is why you must explicitly tie coroutines to `viewModelScope` or `lifecycleScope` so they cancel automatically when the host dies, breaking the reference chain.
+*Answer:* A lambda sent into a coroutine captures its surrounding environment. If you reference `this` inside a View or Activity scope, the Coroutine holds the Activity alive. Choose a scope matching the work owner, avoid capturing UI in longer-lived jobs, and unregister callbacks. For Fragment View updates use the View lifecycle; ViewModel scope ends when the ViewModel is cleared, not on each Activity recreation.
+
+## Đọc sâu và thực hành
+
+[Context, listener ownership và điều tra memory leak](../android-core/context-memory.md).

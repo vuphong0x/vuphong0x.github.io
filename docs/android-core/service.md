@@ -51,3 +51,7 @@ Và một số giá trị khác nữa
 - **Service là một Android Component:** Nó đại diện cho *mong muốn* của ứng dụng muốn thực hiện một tác vụ chạy nền (background operation) hoặc cung cấp tính năng cho app khác. Service có vòng đời (Lifecycle) rõ ràng (`onCreate`, `onStartCommand`, `onDestroy`) và được **Hệ điều hành Android (OS) quản lý**.
 
 - **Thread là đơn vị thực thi của Hệ điều hành (OS Execution Unit):** Nó dùng để xử lý các tác vụ đồng thời (concurrency) để không làm đơ giao diện. Thread hoàn toàn "mù tịt" về vòng đời của Android Component. Khi bạn khởi tạo một `Thread`, Android OS không hề biết Thread đó đang làm gì hay có quan trọng không.
+
+## Đọc sâu và thực hành
+
+[Chọn Coroutines, WorkManager hoặc Foreground Service](./background-work.md).

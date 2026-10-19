@@ -1,0 +1,9 @@
+{
+  "position": 8.5,
+  "label": "Security & Privacy",
+  "link": {
+    "type": "generated-index",
+    "title": "Security & Privacy",
+    "description": "Threat model, TLS, credentials, permissions và ranh giới tin cậy trong ứng dụng Android."
+  }
+}

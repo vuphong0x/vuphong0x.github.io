@@ -225,3 +225,7 @@ Dùng *flowOn()* để chuyển đổi context của flow.
 - Cấu hình được ***replay*** (gửi lại bao nhiêu giá trị cho Collector mới)
 
 - Phù hợp cho xử lý ***Sự kiện (Events)*** như show SnackBar, Navigate, Toast.
+
+## Đọc sâu và thực hành
+
+[Flow, sharing, backpressure và lifecycle](./flow-lifecycle.md).

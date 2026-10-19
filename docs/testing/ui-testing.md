@@ -1,79 +1,63 @@
-# UI Testing (Espresso and Compose)
+---
+title: UI testing, semantics và synchronization
+---
 
-UI tests are instrumented tests. They run on a physical device or emulator, meaning they have access to the full Android Framework (`Context`, `Activity`, `Instrumentation`). They are slower but test the application precisely the way a user interacts with it.
+# UI test: hành vi người dùng và đồng bộ đúng nguồn
 
-## Traditional UI Testing: Espresso
+Espresso làm việc với View hierarchy; Compose testing API tìm node theo semantics. Trên Android, `createComposeRule()` vẫn dùng cơ chế host/instrumentation tương ứng: “không phải chỉ định Activity riêng” không đồng nghĩa “không có Activity” hoặc một JVM test thuần.
 
-Espresso is the core API for interacting with standard XML Views. Its core philosophy revolves around automatically synchronizing with the UI thread to prevent flaky tests resulting from animations or network delays.
+## 1. Chọn test rule
 
-### Core Architecture
-1. **ViewMatchers:** Find a view (`onView(withId(R.id.button_login))`).
-2. **ViewActions:** Perform an action (`perform(click())`, `perform(typeText("user"))`).
-3. **ViewAssertions:** Check a state (`check(matches(isDisplayed()))`).
+- `createComposeRule()` phù hợp đặt content cần kiểm tra mà không chọn Activity sản phẩm cụ thể.
+- `createAndroidComposeRule<YourActivity>()` phù hợp cần Activity cụ thể và integration của nó.
+- `createEmptyComposeRule()` không tự cung cấp host/content; test phải tổ chức môi trường riêng theo contract API.
 
-```kotlin
-@RunWith(AndroidJUnit4::class)
-class LoginScreenTest {
+Thiết lập dependencies/source set theo phiên bản Compose đang dùng. Không trộn giả định của local JVM tests với instrumented UI tests.
 
-    @get:Rule
-    val activityRule = ActivityScenarioRule(LoginActivity::class.java)
+Nguồn: [Compose testing setup](https://developer.android.com/develop/ui/compose/testing).
 
-    @Test
-    fun testFailedLoginShowsErrorToast() {
-        onView(withId(R.id.username)).perform(typeText("invalid_user"))
-        onView(withId(R.id.password)).perform(typeText("wrong_pass"))
-        onView(withId(R.id.login_button)).perform(click())
-
-        // Verify the error message view becomes visible
-        onView(withText("Invalid Credentials"))
-            .check(matches(isDisplayed()))
-    }
-}
-```
-
-## Modern UI Testing: Compose Testing
-
-Jetpack Compose uses semantics instead of View IDs. Semantics define accessible information about the Compose tree, letting TalkBack accessibility services—and the Test Framework—know what a node represents.
+## 2. Ví dụ kiểm tra state/action của một button
 
 ```kotlin
-class ComposeLoginTest {
-
+class SubmitButtonTest {
     @get:Rule
-    val composeTestRule = createComposeRule()
+    val compose = createComposeRule()
 
     @Test
-    fun testLoginButtonEnabledOnlyWhenFieldsAreFilled() {
-        // Set the UI Content directly! No Activity Required!
-        composeTestRule.setContent {
-            MyTheme {
-                LoginScreen()
+    fun disabledButtonDoesNotSubmit() {
+        var submissions = 0
+        compose.setContent {
+            Button(onClick = { submissions++ }, enabled = false) {
+                Text("Submit")
             }
         }
-
-        // Before entering text, the button is disabled
-        composeTestRule.onNodeWithText("Login").assertIsNotEnabled()
-
-        // Enter text 
-        composeTestRule.onNodeWithTag("EmailInput").performTextInput("test@test.com")
-        composeTestRule.onNodeWithTag("PassInput").performTextInput("password")
-
-        // Now button is enabled
-        composeTestRule.onNodeWithText("Login").assertIsEnabled()
+        compose.onNodeWithText("Submit").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, submissions) }
     }
 }
 ```
 
-## Flakiness and Idling Resources
+Ví dụ dùng Compose Material và UI test JUnit4. Đây là kiểm tra UI nhỏ; test thành công phải có case button enabled, click và callback/behavior được kích hoạt. Trong UI nhiều node cùng text, dùng matcher có semantics đủ phân biệt thay vì dựa vào thứ tự node.
 
-A flaky test is a test that sometimes passes and sometimes fails without code changes. UI tests are highly susceptible to flakiness due to unpredictable real-world networking or database delays.
-- **Espresso / Compose Rule** inherently wait for the UI thread to go idle.
-- However, if you are running Coroutines / Retrofit off the main thread, the Test Framework doesn't know about them. 
-- You must implement **IdlingResources** to tell the test runner: *"Wait, I'm doing network operations in the background right now. Do not assert the UI until I say I'm done."*
+Test tag hữu ích khi cần định danh kỹ thuật, nhưng không thay accessible label/role/action. Semantics merge có thể làm cây test khác layout tree; chỉ dùng unmerged tree khi thực sự kiểm tra boundary đó.
 
-## Interview Questions
+## 3. Idle của UI chưa chắc network đã hoàn tất
 
-**Q: What is a Flaky Test and how do you fix it?**
-*Answer:* A flaky test is unreliable due to race conditions or background timing. To fix it, you replace `Thread.sleep()` with IdlingResources or wrap network modules using a mocked offline engine (e.g., WireMock or MockWebServer) during UI testing to make the test utterly deterministic and isolated from actual internet latency.
+Framework đồng bộ các nguồn nó biết, không tự hiểu mọi request Retrofit, external callback hoặc background job. Inject fake cho screen tests; với integration thực, đăng ký IdlingResource hoặc chờ điều kiện bounded theo API test. Không đăng ký resource luôn “busy” hay dùng sleep để che race.
 
-**Q: Explain the difference between `createComposeRule` and `createAndroidComposeRule`.**
-*Answer:* `createComposeRule` allows you to test pure composable functions in total isolation without needing a host Activity (fast and robust). `createAndroidComposeRule` boots up an actual specified `Activity` hosting the Composable, granting you access to `getString()`, `Theme`, or Activity-specific ViewModels.
+Compose test clock giúp điều khiển animation/recomposition theo API; nó không tự tiến server clock hoặc mọi coroutine dispatcher ngoài Compose. Kiểm tra boundary của clock đang dùng trước khi kết luận một delay được skip.
+
+Nguồn: [Compose synchronization](https://developer.android.com/develop/ui/compose/testing/synchronization), [Espresso Idling Resources](https://developer.android.com/training/testing/espresso/idling-resource).
+
+## 4. Ma trận UI đủ sát sản phẩm
+
+| Trường hợp | Cần kiểm tra |
+| --- | --- |
+| Loading/error/retry | Có trạng thái rõ, không submit lặp ngoài contract |
+| Font scale/thiết bị nhỏ | Nội dung và action chính vẫn dùng được |
+| TalkBack/keyboard | Tên, role, focus và action phù hợp |
+| Rotation/back stack | Input/selection phục hồi đúng owner |
+| Network hoàn tất lúc STOPPED | Không truy cập View cũ; state quan trọng vẫn tồn tại |
+| Process death | Test riêng, không đánh đồng recreate |
+
+Đọc tiếp: [state recovery](../android-core/state-recovery.md#verify-restoration), [custom View accessibility](../ui/custom-view.md#accessibility), [test strategy](./test-strategy.md).

@@ -1,46 +1,99 @@
-# General Android Interview Questions
+---
+sidebar_position: 1
+title: Câu hỏi phỏng vấn Android
+---
 
-These questions test the baseline foundational knowledge expected of intermediate to senior Android developers.
+# Câu hỏi phỏng vấn Android: từ nền tảng đến Senior
 
-### 1. Context and Memory
+Bộ câu hỏi này xoay quanh năm nhóm: Context và bộ nhớ, lifecycle và state, concurrency và background work, kiến trúc, custom View. Với mỗi câu, hãy giải thích **cơ chế → lựa chọn → đánh đổi → cách kiểm chứng**, rồi đối chiếu với tình huống thực tế.
 
-**Q: What is a `Context`? What is the difference between Application Context and Activity Context?**
-- **Answer:** `Context` provides access to application-specific resources and classes, as well as up-calls for application-level operations (launching activities, broadcasting, receiving intents).
-- You use **Activity Context** when dealing with UI operations (e.g., creating a View, inflating layouts, showing Dialogs) because it contains the theme and style of the current screen.
-- You use **Application Context** when a singleton or background service needs a context (e.g., initiating a Room database instance), because it is tied to the lifecycle of the entire app process, thus preventing memory leaks.
+[Tra cứu bài đọc theo câu hỏi](./reading-guide.md) · [Học theo lộ trình Senior](./senior-android.md) · [Luyện quiz](/quiz)
 
-**Q: How do you identify and fix a Memory Leak in Android?**
-- **Answer:** A memory leak occurs when the Garbage Collector cannot free an object holding onto memory because there is an active reference pointing to it (often an Activity or View).
-- **Tools:** Use LeakCanary during development. Use Android Studio Memory Profiler to take a Heap Dump and trace the offending GC Root.
-- **Fix:** Clear references in `onDestroy()` using nullification. Avoid placing `Context` in companion objects. Make sure inner classes containing callbacks are static, or utilize coroutine scopes correctly (`viewModelScope`) so long-running async tasks are automatically cancelled before the host Activity dies.
+## 1. Context và bộ nhớ {#context-memory}
 
-### 2. Lifecycles and state
+**Context là gì? Khi nào dùng Application Context hoặc Activity Context?**
 
-**Q: If an Activity is destroyed and recreated on screen rotation, how can you save UI state?**
-- **Answer:**
-  1. `ViewModel`: Perfect for retaining heavy, complex domain objects during simple configuration changes.
-  2. `SavedStateHandle`: Used inside the ViewModel to serialize simple parameters (String, Int, IDs) into an OS bundle. It survives both configuration changes AND System-Initiated Process Death (when the OS kills apps in the background to save battery/RAM).
-  3. `onSaveInstanceState()`: Legacy method if not using ViewModel.
+Context cung cấp quyền truy cập resource, service và các thao tác ở cấp ứng dụng. Activity Context mang cấu hình/theme của màn hình và gắn với Activity đó. Application Context phù hợp cho đối tượng cần sống theo process, như database; không dùng nó thay thế mọi UI context. Singleton giữ Activity Context có thể giữ cả Activity cũ sau rotation.
 
-### 3. Concurrency and Background Tasks
+**Tình huống Senior:** sau khi đóng màn hình camera 20 lần, RAM tăng. Bạn điều tra thế nào?
 
-**Q: Explain the difference between `WorkManager`, `Services`, and `Coroutines`.**
-- **Answer:**
-  - **Coroutines:** Best for executing immediate asynchronous work tied to a screen or user session perfectly synchronized with lifecycles. If the app kills the screen/process, the background work is terminated.
-  - **Foreground Service:** Best for tasks where the user is actively aware the app is doing work in the background (playing music, tracking a workout via GPS) and expects it not to be killed aggressively. Must show an ongoing notification.
-  - **WorkManager:** Best for deferrable, guaranteed background work. E.g., uploading analytics logs or syncing the database offline. WorkManager guarantees execution regardless of app reboots or sudden kills, while also respecting battery conditions (e.g., "only run on unmetered Wi-Fi while charging").
+Phân biệt cache/heap tăng tạm thời với đối tượng bị giữ sai vòng đời. Reproduce, lấy heap dump, tìm Activity đã bị destroy, lần reference tới GC root. Sửa nơi giữ listener/callback/View, rồi chạy lại cùng kịch bản. Không coi `System.gc()` hoặc `largeHeap` là cách chữa leak.
 
-### 4. Application Architecture
+**Bẫy:** đặt mọi reference thành `null` trong `onDestroy()` không giải quyết listener còn được singleton giữ; process death cũng không bảo đảm callback này chạy.
 
-**Q: Explain how clean Unidirectional Data Flow (UDF) works in Compose and MVVM.**
-- **Answer:** UDF requires State to flow strictly downwards, and Events to flow strictly upwards.
-  - The UI Screen (Composable/Fragment) triggers an intent/event: e.g., "Login Button Clicked".
-  - The UI passes the event *up* to the ViewModel.
-  - The ViewModel processes the login via the repository on a background thread.
-  - The ViewModel mutates the single source of truth (`StateFlow<UiState>`).
-  - The UI Screen observes this StateFlow and instantly reacts to it *downward*, re-rendering itself to show the "Loading spinner" or "Success screen".
+**Đọc sâu:** [Context, ownership và memory leak](../android-core/context-memory.md) phân tích reference chain, callback giữ Activity và cách cleanup bằng callbackFlow. Bắt đầu từ [quy trình điều tra heap](../android-core/context-memory.md#diagnose) nếu muốn thực hành debugging. Tham khảo thêm [memory management](../performance/memory.md).
 
-### 5. Advanced / Misc
+## 2. Lifecycle và state {#state-recovery}
 
-**Q: What is a custom `View` and how do you create one?**
-- **Answer:** When standard widgets (`TextView`, `Button`) don’t fit your needs, you can extend the `View` class. You override `onMeasure()` to dictate exactly what width and height the view demands, and `onDraw(canvas)` to manually paint bitmaps, paths, circles, and text using `Paint` objects onto the screen frame.
+**Màn hình bị xoay hoặc process bị hệ thống kết thúc: giữ state bằng gì?**
+
+| Nhu cầu | Cơ chế | Giới hạn |
+| --- | --- | --- |
+| Giữ dữ liệu màn hình qua configuration change | ViewModel | Không giữ instance qua process death |
+| Phục hồi ID, query, lựa chọn UI nhỏ | SavedStateHandle, rememberSaveable | Phụ thuộc saved state và task được phục hồi |
+| Giữ giỏ hàng, bản nháp nghiệp vụ | Room, DataStore hoặc backend tùy kiểu dữ liệu | Cần chính sách ghi, migration và đồng bộ |
+
+`onSaveInstanceState()` vẫn là API hợp lệ cho saved state của Activity/View; không phải nơi lưu database hay bitmap lớn. ViewModel được tạo lại sau process death và dùng ID để nạp lại dữ liệu, không được “hồi sinh” nguyên instance.
+
+**Tình huống Senior:** user quay lại checkout sau khi app ở background bị kill. Lưu bước hiện tại và cart ID trong saved state, lưu cart bền vững, rồi tải lại và xác thực giá/tồn kho với server trước khi thanh toán.
+
+**Bẫy:** force-stop, xóa task, `finish()` và system-initiated process death có hành vi phục hồi khác nhau.
+
+**Đọc sâu:** [State recovery](../android-core/state-recovery.md) có timeline khởi tạo lại process, ví dụ SavedStateHandle và ma trận test. Đọc [ví dụ lưu query/selection](../android-core/state-recovery.md#saved-state-example), sau đó thử mất mạng trong lúc restore.
+
+## 3. Concurrency và background work {#background-work}
+
+**Phân biệt Coroutines, Service và WorkManager?**
+
+| Công việc | Lựa chọn khởi đầu | Cần làm rõ |
+| --- | --- | --- |
+| Fetch dữ liệu khi mở màn hình | Coroutine theo scope phù hợp | Hủy khi nào? API có main-safe không? |
+| Đồng bộ dữ liệu cần tiếp tục sau process restart | WorkManager + dữ liệu persist | Constraints, retry, quota, idempotency |
+| Phát nhạc/theo dõi vận động người dùng đang biết | API chuyên dụng/Foreground Service khi phù hợp | Notification, service type, quyền và giới hạn nền |
+
+Service không tự cung cấp worker thread. WorkManager lưu lịch bền vững, nhưng không bảo đảm hoàn thành ngay, đúng thời điểm hay side effect chỉ xảy ra một lần. Nó chịu Doze, quota và giới hạn hệ thống; force-stop có thể ngăn công việc chạy cho tới khi người dùng mở lại ứng dụng.
+
+**Tình huống Senior:** upload thành công trên server nhưng client timeout. Retry dùng cùng upload ID/idempotency key; server deduplicate. Giữ trạng thái local để tiếp tục sau restart.
+
+**Bẫy:** `suspend` không tự chuyển thread; `launch(DEFAULT)` không luôn chạy sau dòng kế tiếp; không chuyển `CancellationException` thành lỗi nghiệp vụ.
+
+**Đọc sâu:** [Structured concurrency](../foundation/kotlin/structured-concurrency.md) phân tích hai API song song và partial failure; [Flow theo lifecycle](../foundation/kotlin/flow-lifecycle.md) giải thích sharing/backpressure; [background work](../android-core/background-work.md) đi từ persist input đến unique work, retry và khoảng hở sau server commit.
+
+## 4. Kiến trúc và UDF {#architecture}
+
+**State và event đi theo hướng nào trong Compose/MVVM?**
+
+UI gửi action lên state holder; ViewModel phối hợp repository/use case khi cần; state mới chảy xuống UI. Expose immutable state và giữ một nguồn sở hữu state rõ ràng. Repository chịu trách nhiệm contract dữ liệu; không mặc định mọi hàm phải là `Flow<Result<T>>`.
+
+**Tình huống Senior:** kết quả thanh toán phát lúc màn hình STOPPED. `SharedFlow(replay=0)` không giữ kết quả cho subscriber tương lai. Kết quả quan trọng nên nằm trong state/dữ liệu có ID, có xác nhận xử lý nếu cần, và persist nếu yêu cầu phục hồi sau process death. Không có Channel/SharedFlow nào tự cung cấp bảo đảm xử lý exactly-once cho nghiệp vụ.
+
+**Đánh đổi:** thêm UseCase khi business rule/reuse/orchestration đáng kể; một lớp chỉ chuyển tiếp lời gọi có thể làm app đơn giản khó bảo trì hơn. Module hóa cần boundary và phép đo build, không chỉ tăng số module.
+
+**Đọc sâu:** [UDF, UI state và event delivery](../architecture/ui-state-events.md) có timeline mất event, state transition checkout và phân tích acknowledgment. [Offline-first](../data/offline-first.md) bổ sung outbox, transaction local, reconcile và xung đột giữa thiết bị.
+
+## 5. Custom View và UI hiện đại {#custom-view}
+
+**Khi nào cần custom View, và các callback chính làm gì?**
+
+- `onMeasure()`: tính kích thước mong muốn, xét padding/minimum và MeasureSpec từ parent; gọi `setMeasuredDimension()`.
+- `onSizeChanged()`: tính hình học phụ thuộc kích thước thay vì tính lại mọi thứ ở mỗi frame.
+- `onDraw()`: vẽ bằng Canvas/Paint, hạn chế allocation và I/O.
+- `invalidate()`: yêu cầu vẽ lại; `requestLayout()`: yêu cầu đo/layout lại khi kích thước có thể thay đổi.
+
+**Tình huống Senior:** biểu đồ realtime giật. Đo frame timing/allocation; chuẩn bị Paint, Path và dữ liệu ngoài draw path, chỉ yêu cầu layout khi cần. Cung cấp semantics/accessibility cho nội dung tương tác; với biểu đồ có nhiều vùng tương tác, cân nhắc virtual accessibility hierarchy.
+
+**Câu hỏi Compose tương ứng:** key của `LaunchedEffect` thể hiện điều gì? Tại sao stable item key quan trọng? Khi nào dùng `derivedStateOf`? Vì sao không thể kết luận “unstable luôn recompose” khi strong skipping được bật?
+
+**Đọc sâu:** [Custom View](../ui/custom-view.md) có ví dụ đo/vẽ hoàn chỉnh cho một View đơn giản, phân tích invalidate/requestLayout và giới hạn accessibility. [Jetpack Compose](../ui/jetpack-compose.md) mở rộng effect keys, callback mới, mutable state và các phase render.
+
+## Tự đánh giá câu trả lời
+
+Một câu trả lời tốt cần nêu giả định, mô tả một failure case, giải thích lý do chọn giải pháp và đề xuất phép kiểm chứng. Tỷ lệ quiz đúng giúp tìm lỗ hổng kiến thức; kinh nghiệm Senior còn cần code review, debugging và giải quyết bài toán thực tế.
+
+## Nguồn chính thức
+
+- [Lưu UI state — Android Developers](https://developer.android.com/topic/libraries/architecture/saving-states)
+- [Chọn background work — Android Developers](https://developer.android.com/develop/background-work)
+- [UI events — Android Developers](https://developer.android.com/topic/architecture/ui-layer/events)
+- [Tạo custom View — Android Developers](https://developer.android.com/develop/ui/views/layout/custom-views/custom-drawing)
+- [CoroutineStart.DEFAULT — Kotlin](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-d-e-f-a-u-l-t/)

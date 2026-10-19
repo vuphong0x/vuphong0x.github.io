@@ -1,55 +1,51 @@
-# App Startup Performance
+---
+title: Startup, App Startup và Baseline Profiles
+---
 
-Users form their first impression of an app during startup. A slow app startup leads to abandonment and uninstalls. Google measures this strictly in Vitals (Cold start < 5s, Warm start < 2s, Hot start < 1.5s).
+# Tối ưu startup bằng user journey và phép đo
 
-## Types of Startup
+Startup nhanh là khi user đến được nội dung có ích theo yêu cầu sản phẩm, không chỉ nhìn thấy splash sớm. Phân biệt **time to initial display** và thời điểm nội dung thực sự sẵn sàng; ghi rõ điểm kết thúc metric để tránh tối ưu một con số mà trải nghiệm không cải thiện.
 
-1. **Cold Start:** App is completely dead. OS must create the process, instantiate the `Application` class, load themes, and launch the `MainActivity`.
-2. **Warm Start:** The process is alive, but the Activity must be completely recreated (e.g., user hits Back, then re-launches the app).
-3. **Hot Start:** App process is alive AND Activity is in memory; it just needs to be brought to the foreground.
+## 1. Cold, warm và hot start
 
-## Common Startup Bottlenecks
+Cold start phải tạo process; warm/hot có các tài nguyên/instance được giữ lại khác nhau. Đừng suy ra loại start chỉ từ một thao tác Back trên mọi phiên bản Android. Benchmark cần setup kiểm soát được process/activity state.
 
-### 1. Massive `Application.onCreate()`
-Developers often initialize dozens of third-party SDKs (Crashlytics, Analytics, Push Notifications, Database initializations) directly in `Application.onCreate()`. This blocks the main thread.
-- **Fix:** Defer non-critical initializations. Run them asynchronously using Coroutines, or delay them until the user actually reaches the screen that requires them.
+Ngưỡng Android Vitals là chỉ báo chất lượng theo định nghĩa/platform, không phải mục tiêu trải nghiệm chung cho mọi app. Đặt budget cho user journey, thiết bị và dữ liệu của sản phẩm; xem tài liệu hiện hành khi đọc threshold.
 
-### 2. View Inflation
-Inflating deeply nested, complex XML layouts heavily impacts Activity creation time.
-- **Fix:** Flatten layouts. Use Compose, which compiles differently, or use `ViewStub` to load hidden views lazily.
+Nguồn: [App startup time](https://developer.android.com/topic/performance/issues/launch-time).
 
-### 3. Splash Screens
-Avoid implementing fake Splash Screens that pause the UI (e.g., waiting 3 seconds for an API call).
-- **Fix:** Use the official `SplashScreen` API. It uses the app theme window background (loaded instantly by the OS *before* the app process starts) to show the logo.
+## 2. Lập initialization graph
 
-## AndroidX App Startup Library
+Liệt kê công việc trước frame đầu và dependency thật: đọc session, dựng root UI, SDK, database, analytics. Tách việc bắt buộc trước UI khỏi việc có thể defer/lazy; không chuyển mọi initialization sang coroutine mà không xét API yêu cầu thread/lifetime.
 
-Provides a straightforward, performant way to initialize components at application startup via a single `ContentProvider` instead of multiple `ContentProviders`.
-- Every third-party SDK added to the manifest with its own `<provider>` increases startup overhead individually.
-- App Startup coalesces these into a single initializer engine.
+| Công việc | Câu hỏi review |
+| --- | --- |
+| SDK trong Application/provider | Có cần cho màn hình đầu? Có dependency ẩn? |
+| Disk/network trên main | Có thể dùng cache/loading state hoặc API main-safe? |
+| Database open/migration | Chi phí và đường lỗi có được đo/test? |
+| Decode ảnh đầu màn hình | Decode đúng kích thước và nguồn cache? |
+| Splash giữ lâu | Đang che loading/error nào? User có đường xử lý? |
 
-```kotlin
-// Example Initializer
-class WorkManagerInitializer : Initializer<WorkManager> {
-    override fun create(context: Context): WorkManager {
-        WorkManager.initialize(context, Configuration.Builder().build())
-        return WorkManager.getInstance(context)
-    }
-    override fun dependencies(): List<Class<out Initializer<*>>> = emptyList()
-}
-```
+App Startup giúp tổ chức dependency giữa initializer và giảm một số provider startup overhead khi được tích hợp đúng. Nó không tự làm initialization bất đồng bộ hoặc nhanh hơn. Không tự đăng ký thêm initializer WorkManager trong khi default initializer vẫn hoạt động; phải theo integration guide/version của thư viện.
 
-## Baseline Profiles
+Nguồn: [App Startup](https://developer.android.com/topic/libraries/app-startup).
 
-Historically, apps were compiled Just-In-Time (JIT) meaning first runs were slow while the OS figured out what methods to optimize (AOT compile).
-- **Baseline Profiles** allow developers to ship a predefined profile containing the critical paths the app follows on startup.
-- The OS reads this profile upon installation via Google Play and AOT compiles the startup methods *before the user even opens the app*.
-- This grants up to 30%-40% faster startup speeds on Android 7.0+. Use the `Macrobenchmark` library to generate them.
+## 3. Đo trước/sau, không so bằng cảm giác {#measurement}
 
-## Interview Questions
+Chọn cùng thiết bị, build gần release, dữ liệu, network/cache policy và compilation mode. Lặp nhiều lần, ghi biến động; thermal/background work có thể làm sai phép so sánh. Giữ trace để xác định thời gian trong main thread, Binder, I/O hoặc scheduling.
 
-**Q: Why shouldn't you do networking or database checks straight in the Activity's `onCreate()` synchronously?**
-*Answer:* The OS won't render the first visual frame (meaning the app remains a blank white screen window) until `onCreate()`, `onStart()`, and `onResume()` complete their execution and yield back to the Choreographer. Synchronous heavy lifting will result in massive UI freezing.
+Không kết luận đổi XML sang Compose tự cải thiện startup. Cả hai đều có initialization/layout work cần đo. Cũng không coi số SDK ít hơn là bằng chứng startup nhanh nếu công việc nặng còn nằm trên critical path.
 
-**Q: Explain how Baseline Profiles differ from R8 Proguard rules.**
-*Answer:* R8/Proguard rules dictate code shrinking and obfuscation. They tell the compiler *what* to keep in the final APK. Baseline Profiles dictate *how* the Android Runtime on the user's phone should translate the bytecode into Machine Code ahead of time.
+## 4. Baseline Profiles và R8
+
+R8 tối ưu/shrink/obfuscate chương trình ở build pipeline; profile hướng dẫn runtime compile các code path quan trọng. Baseline Profile cần user journey phù hợp, packaging/installation được hỗ trợ và benchmark kiểm tra profile thật sự được dùng.
+
+Không có mức tăng tốc cố định 30–40% cho mọi ứng dụng. So compilation modes có/không profile bằng Macrobenchmark, giữ cùng đầu vào và kiểm tra startup lẫn scrolling/action quan trọng. Profile không sửa synchronous network trên main hoặc một thuật toán quá tốn chi phí.
+
+Nguồn: [Baseline Profiles](https://developer.android.com/topic/performance/baselineprofiles/overview).
+
+## 5. Bài thực hành
+
+Đo cold start tới feed có thể tương tác. Vẽ initialization graph, chọn một công việc defer được, đo lại và ghi tradeoff: frame đầu nhanh hơn nhưng action đầu tiên có bị chậm không? Thêm profile cho journey rồi kiểm tra độc lập lợi ích của thay đổi code và compilation.
+
+Đọc tiếp: [Profiling/Macrobenchmark](./profiling.md#senior-measurement), [test strategy](../testing/test-strategy.md), [capstone](../interview/senior-capstone.md).

@@ -29,8 +29,8 @@ val args: DetailFragmentArgs by navArgs()
 val item = args.itemId
 ```
 
-### Type-Safe Routing (Compose Navigation in Android 14+)
-Modern Compose Navigation uses Kotlin Serialization. You define routes as Data Objects or Data Classes.
+### Type-Safe Routing (Navigation 2.8.0+)
+Các type-safe APIs của Navigation 2.8.0+ dùng Kotlin Serialization; đây là khả năng của thư viện, không yêu cầu Android 14+. You define routes as Data Objects or Data Classes.
 ```kotlin
 @Serializable object Home
 @Serializable data class UserProfile(val userId: String)
@@ -62,3 +62,6 @@ You simply define `<deepLink>` tags in XML or `deepLink = listOf(...)` in Compos
 
 **Q: What happens if you try to pass a large Bitmap or List of objects via Safe Args or standard Intents?**
 *Answer:* You will trigger a `TransactionTooLargeException`. The Android IPC maximum buffer size is slightly under 1MB, shared across all active transactions. You should only pass identifiers (like database IDs) and query the data locally.
+
+
+Đọc thêm: [Navigation release notes](https://developer.android.com/jetpack/androidx/releases/navigation#2.8.0), [external links và authorization](../security/permissions-components.md#app-links).

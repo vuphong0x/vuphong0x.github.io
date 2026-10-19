@@ -84,17 +84,17 @@ fun fetchData(completion: Continuation<Any?>): Any? {
 }
 ```
 
-## **2. launch vaf async**
+## **2. launch và async**
 
 **Q: Khi gọi launch hoặc async thì logic bên trong có được thực thi ngay lập tức không?**
 
-Khi gọi `launch` hoặc `async` theo mặc định thì logic bên trong sẽ **KHÔNG** được thực thi ngay lập tức, mà sẽ được lập lịch (scheduled) để thực hiện.
+Với `CoroutineStart.DEFAULT`, block bắt đầu theo dispatcher trong context. Có thể cần dispatch hoặc chạy ngay nếu dispatcher không cần dispatch, ví dụ `Dispatchers.Main.immediate` khi đang trên main thread. Không suy luận rằng mọi `launch` đều chạy sau dòng kế tiếp.
 
 Nguyên nhân là do cơ chế của `CoroutineStart` và cách `Dispatcher` hoạt động.
 
 `CoroutineStart.DEFAULT` **(Mặc định)**
 
-- **Cơ chế**: Coroutine được gửi đến `Dispatcher` chỉ định. Dispatcher sẽ đưa nó vào queue (hàng đợi) và thực thi khi có tài nguyên (thread trống) và đến lượt nó.
+- **Cơ chế**: Coroutine tuân theo dispatcher; khi cần dispatch, nó được lập lịch. Ví dụ `runBlocking` bên dưới dùng event loop nên block launch chạy sau câu lệnh `println("C")` trong ví dụ này.
 
 - **Khả năng hủy:** Nếu gọi `job.cancel()` ngay sau khi gọi `launch`, Coroutine có thể bị hủy **trước khi nó kịp bắt đầu** chạy dòng code đầu tiên.
 
@@ -135,9 +135,7 @@ fun main() = runBlocking {
 
 Chạy **ngay lập tức** trên **thread hiện tại** cho đến khi gặp điểm treo `suspension point`) đầu tiên. Sau khi resume, nó sẽ tiếp tục chạy trên Dispatcher được đính nghĩa trong Context (có thể khác luồng ban đầu)
 
-**Cơ chế**: Coroutine được gửi đến `Dispatcher` để xếp hàng. Ngay sau khi gọi `launch`, luồng code hiện tại (bên ngoài khối `launch`) sẽ **tiếp tục chạy ngay lập tức** mà không đợi khối logic bên trong.
-
-**Thứ tự thực thi**: Khối logic bên trong sẽ chạy ngay khi `Dispatcher` có tài nguyên (thread trống) và đến lượt nó.
+**Lưu ý:** UNDISPATCHED chạy ngay đoạn đầu trên thread gọi; sau suspension, việc resume tuân theo dispatcher trong context. Điều này không có nghĩa mọi DEFAULT đều phải vào queue.
 
 ```
 fun main() = runBlocking {
@@ -171,16 +169,7 @@ Sau Suspend: DefaultDispatcher-worker-1 @coroutine#2
 
 **Q:** `Dispatchers.IO` **và** `Dispatchers.Default` **dùng chung một Thread Pool. Vậy làm thế nào hệ thống đảm bảo việc gọi cả ngàn request IO không làm "chết đói" (starvation) các tác vụ tính toán CPU của Default?**
 
-\- Hệ thống giải quyết bài toán này thông qua bộ lập lịch **CoroutineScheduler** với 2 cơ chế cốt lõi:
-
-1\. **Giới hạn độc lập (Logical Quotas):**&#x20;
-
-\- `Default` luôn bị giới hạn số luồng hoạt động đồng thời bằng đúng số nhân CPU. Trong khi đó, `IO` có hạn mức trần mặc định là 64 luồng. Hàng ngàn request IO vượt quá con số 64 sẽ phải nằm trong hàng đợi chứ không thể "nuốt chửng" toàn bộ Thread Pool.
-
-2\. **Bù đắp luồng (Thread Injection):**&#x20;
-
-\- Đây là cơ chế quan trọng nhất. Khi một luồng IO bị *\*block\** (ví dụ: đang chờ phản hồi từ Network), nó không còn tiêu thụ CPU nữa. Hệ thống sẽ lập tức phát hiện và **tạo thêm luồng mới** để thế chỗ. Điều này đảm bảo các tác vụ của `Default` luôn có đủ luồng (bằng số nhân CPU) để tiếp tục tính toán mà không bị gián đoạn.\
-
+IO và Default có thể dùng chung thread của scheduler nhưng áp dụng hạn mức song song khác nhau. IO mặc định dùng giới hạn lớn hơn giữa 64 và số core, có thể cấu hình; view `limitedParallelism` của IO có quy tắc elasticity riêng. Default hướng tới CPU-bound work, IO hướng tới blocking I/O. Scheduler có thể bù thêm worker cho tác vụ được đánh dấu blocking, nhưng không phải cơ chế phát hiện mọi I/O hay cam kết không có starvation trong mọi workload.
 
 **Q: CoroutineScope và CoroutineContext khác nhau như thế nào? Trong code hay viết** `CoroutineScope(Dispatchers.IO + SupervisorJob() + CoroutineName("MyCoroutine"))`**. Giải thích phép cộng** `+` **đang làm gì? Cấu trúc dữ liệu bên dưới CoroutineContext là gì?**
 
@@ -211,7 +200,7 @@ Cả hai đều được dùng để quản lý hệ thống phân cấp corouti
 **1. Call 2 API song song**
 
 ```kotlin
-suspend function loadData(): Pair<String, String> = coroutineScope {
+suspend fun loadData(): Pair<String, String> = coroutineScope {
     val user = async { getUser() }
     val settings = async { getSettings() }
     return@coroutineScope Pair(user.await(), settings.await())
@@ -220,7 +209,7 @@ suspend function loadData(): Pair<String, String> = coroutineScope {
 
 **2. Nếu đang call API mà người dùng nhấn Back, làm sao để không bị leak memory hoặc tốn băng thông?**
 
-Sử dụng **viewModelScope**. Khi người dùng nhấn Back, Activity/Fragment bị hủy -> ViewModel bị clear -> Coroutine bị Cancel. Khi Coroutine bị cancel, nó throw ra `CancellationException`. Các thư viện như **Retrofit** sẽ bắt Exception này và gọi lệnh `call.cancel` xuống **OkHttp** để hủy request.
+Chọn scope theo owner của công việc. `viewModelScope` bị hủy khi ViewModel thực sự được clear, không phải mỗi lần Activity/Fragment bị destroy (ví dụ rotation). Công việc cập nhật View cần theo View lifecycle; công việc cần sống qua màn hình cần owner khác. Retrofit suspend API hỗ trợ cancellation của HTTP call, nhưng hủy phía client không bảo đảm server rollback thao tác đã nhận.
 
 **3. Làm sao để tránh gọi API trùng lặp khi user spam "Refresh" liên tục**
 
@@ -289,3 +278,46 @@ init {
         .launchIn(viewModelScope)
 }
 ```
+
+
+## Senior: dispatcher và main safety {#senior-dispatch}
+
+`suspend` cho phép suspension, không tự chuyển thread. Repository nên cung cấp API main-safe: chuyển **blocking I/O** sang dispatcher IO, CPU-bound work sang Default khi cần; API network/database đã main-safe không cần bị bọc IO một cách máy móc. Inject dispatcher để test kiểm soát được lịch chạy.
+
+`Dispatchers.Main.immediate` có thể chạy ngay khi đã ở main thread. Xác định context trước khi kết luận thứ tự giữa block launch và câu lệnh kế tiếp.
+
+Nguồn: [CoroutineStart.DEFAULT](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-d-e-f-a-u-l-t/), [coroutine context và dispatcher](https://kotlinlang.org/docs/coroutine-context-and-dispatchers.html).
+
+## Senior: cancellation và partial failure {#senior-cancellation}
+
+Cancellation có tính hợp tác. Đoạn tính toán dài không suspend cần kiểm tra cancellation bằng cơ chế phù hợp như `ensureActive()`. Nếu bắt `Exception`, ném lại `CancellationException`; `runCatching` cũng có thể bắt exception này nên cần kiểm tra trước khi biến thành UI error.
+
+```kotlin
+suspend fun load(): DomainResult = try {
+    DomainResult.Success(api.load())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: IOException) {
+    DomainResult.NetworkError(error)
+}
+```
+
+`DomainResult` ở đây là sealed type do ứng dụng định nghĩa. Phân loại lỗi theo contract thực tế.
+
+`supervisorScope` cô lập lỗi child, không tự xử lý exception từ `await()`. Nếu exception thoát khỏi chính block supervisorScope, scope thất bại và child khác bị hủy. Muốn partial success, xử lý lỗi từng kết quả bên trong block và vẫn ném lại cancellation.
+
+Nguồn: [exception handling](https://kotlinlang.org/docs/exception-handling.html), [cancellation](https://kotlinlang.org/docs/cancellation-and-timeouts.html).
+
+## Senior: sharing và mất dữ liệu {#senior-sharing}
+
+`stateIn(..., WhileSubscribed(5_000), initial)` dừng upstream sau timeout khi không còn subscriber. Replay cache mặc định vẫn giữ giá trị; muốn reset phải cấu hình thời hạn replay phù hợp. Collector lifecycle-aware không tự hủy mọi producer hot.
+
+`conflate()` bỏ giá trị trung gian khi consumer chậm. Phù hợp progress có thể thay thế bằng giá trị mới nhất, không phù hợp lệnh chuyển tiền cần xử lý từng thao tác. SharedFlow replay=0 có thể mất event lúc không có subscriber; extraBufferCapacity không lưu hộ subscriber chưa tồn tại.
+
+Nguồn: [WhileSubscribed](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-sharing-started/-companion/-while-subscribed.html), [SharedFlow](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-shared-flow/).
+
+[Luyện quiz](/quiz) · [Test coroutines](../../testing/coroutines.md)
+
+## Đọc sâu và thực hành
+
+[Structured concurrency và partial failure](./structured-concurrency.md) · [Flow theo lifecycle](./flow-lifecycle.md).

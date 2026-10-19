@@ -1,50 +1,44 @@
-# CI/CD for Android
+---
+title: CI/CD, release gates và rollback
+---
 
-Continuous Integration and Continuous Deployment (CI/CD) pipelines completely automate the process of building, testing, signing, and releasing Android artifacts (APKs and AABs) to Google Play. 
+# CI/CD: từ bằng chứng ở PR đến rollout có kiểm soát
 
-## 1. Why use CI/CD in Android?
-- **Consistency:** Every build runs in an identical Linux environment (usually Ubuntu). Eliminates the "it works on my machine" problem.
-- **Safety:** Pull Requests cannot be merged if unit tests or UI tests fail in the pipeline.
-- **Velocity:** Automatic deployment to QA (via Firebase App Distribution) or Alpha/Beta tracks avoids manual clicking in Android Studio.
+Pipeline tự động chạy lệnh; nó không tự bảo đảm build tái lập, test đủ hoặc merge bị chặn. Những điều đó cần cấu hình toolchain, dependency, branch/ruleset và release gate cụ thể. Một pipeline xanh chỉ hỗ trợ kết luận trong phạm vi các check thực sự chạy.
 
-## 2. Common Tools
-- **GitHub Actions / GitLab CI / Bitrise:** The machines (runners) that execute the scripts. Bitrise is particularly popular in mobile because it handles macOS/Android environment setups perfectly out of the box.
-- **Fastlane:** A Ruby-based tool acting as the brains of the operation. It interfaces directly with the Google Play Developer Console API to upload metadata, screenshots, and AAB files.
+## 1. Thiết kế các tầng kiểm chứng
 
-## 3. Basic Workflow
+| Giai đoạn | Check cần chọn theo rủi ro | Artifact nên giữ |
+| --- | --- | --- |
+| Pull request | Compile, unit/contract tests, static checks phù hợp | Test report, lỗi có thể tái hiện |
+| Integration | DB migration, HTTP contract, UI/lifecycle trên môi trường chọn trước | Logs đã redact, schema, report thiết bị |
+| Release candidate | Release config, minification, signing, smoke journeys | APK/AAB, mapping/symbols, version/config |
+| Rollout | Chất lượng theo cohort và metric sản phẩm | Crash/ANR, startup, sync failure và quyết định dừng |
 
-A typical production Android CI/CD workflow:
+Build debug thành công không chứng minh artifact minified release đúng. Migration cần được thử từ các schema đang hỗ trợ, không chỉ cài app mới. Giữ versioning/source revision để trace report production về đúng artifact.
 
-### A. On Pull Request (Continuous Integration)
-1. Trigger event on PR creation.
-2. Checkout source code.
-3. Validate `ktlint` or `detekt` (ensure coding standards).
-4. Run standard JUnit local unit tests (`./gradlew testDebugUnitTest`).
-5. *Optional:* Run UI tests on a Firebase Test Lab matrix (costs money but is incredibly robust).
-6. Build a Debug APK to ensure nothing is fundamentally broken (`./gradlew assembleDebug`).
+## 2. Toolchain và dependency
 
-### B. On Merge to `main` (Continuous Delivery)
-1. Run all PR checks again.
-2. Build Release App Bundle (`./gradlew bundleRelease`).
-3. Sign the AAB securely using a Keystore injected via GitHub Secrets.
-4. Upload to Firebase App Distribution via Fastlane so QA testers get an immediate email with the new version.
+Pin phiên bản công cụ/dependency theo policy project, dùng Gradle Wrapper và kiểm tra thay đổi wrapper/dependency review. Cache giúp tốc độ nhưng cũng cần phân biệt cold/warm behavior khi điều tra lỗi. Không tuyên bố mọi runner có môi trường “giống hệt” nếu image hoặc dependency vẫn thay đổi ngoài kiểm soát.
 
-### C. On Tagged Release (Continuous Deployment)
-1. Trigger when a tag like `v1.2.0` is pushed.
-2. Fastlane downloads signing keys.
-3. Fastlane compiles `bundleRelease`.
-4. Fastlane uploads the AAB directly to Google Play Console's Internal Testing or Beta tracks.
+Tên task như `testDebugUnitTest`, `assembleDebug`, `bundleRelease` phụ thuộc Android project/variant. Đặt check đúng source set và variant; website này dùng pipeline Docusaurus, không phải các task Android đó.
 
-## 4. Keystore Security
-**Never commit your `keystore.jks` file to your public repository!** 
-Encode your keystore into a Base64 string, save it in GitHub Secrets, and then decode it back into a file dynamically during the CI pipeline run before executing `./gradlew assembleRelease`.
+## 3. Signing và credential
 
-```yaml
-# GitHub Actions Example decoding keystore
-- name: Decode Keystore
-  id: decode_keystore
-  uses: timheuer/base64-to-file@v1.2
-  with:
-    fileName: 'keystore.jks'
-    encodedString: ${{ secrets.KEYSTORE_BASE64 }}
-```
+Tách upload/signing responsibilities theo Play App Signing và cấu hình phân phối thực tế. Credential có quyền tối thiểu, không lộ trong command log, artifact hoặc PR không tin cậy. Base64 chỉ là encoding, không phải encryption; quyền đọc secret/runner và lifetime file tạm mới là phần cần kiểm soát.
+
+Chỉ cấp quyền release cho job/environment cần nó. Review third-party actions, inputs, permissions và version được pin theo policy. Không chạy release credential trên code PR từ nguồn không tin cậy mà không có boundary phù hợp.
+
+Nguồn: [Android app signing](https://developer.android.com/studio/publish/app-signing).
+
+## 4. Rollout và rollback có giới hạn
+
+Trước rollout, định nghĩa metric/stop condition, thời gian quan sát và owner. Ví dụ pending-sync age tăng, migration crash ở một phiên bản cũ hoặc send success giảm theo cohort có thể quan trọng hơn crash-free rate toàn app.
+
+Rollback client không chắc đảo ngược schema/server changes đã áp dụng. Backend cần compatibility với các phiên bản còn trong thực tế; schema migration/destructive changes cần kế hoạch recovery riêng. Feature flag có thể tắt một đường code nhưng không phục hồi dữ liệu đã bị xóa.
+
+## 5. Bài tập release review
+
+Chuẩn bị release thêm outbox và auth refresh. Ghi check ở PR, check integration, artifact release cần lưu, cohort theo dõi và cách xử lý nếu app cũ không đọc được schema mới. Chỉ ra gate nào do pipeline thực thi và gate nào cần cấu hình repository/store riêng.
+
+Đọc tiếp: [test strategy](../testing/test-strategy.md), [observability](./analytics.md), [legacy refactor](./legacy-code.md), [capstone](../interview/senior-capstone.md).

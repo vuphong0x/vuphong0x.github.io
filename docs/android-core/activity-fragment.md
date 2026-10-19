@@ -31,7 +31,7 @@ Một `Activity` không trực tiếp vẽ các View lên màn hình, mà nó ho
                           SurfaceFlinger
 ```
 
-- **`Window` / `PhoneWindow`**: Đại diện cho một cửa sổ hiển thị cấp cao nhất. `PhoneWindow` là implementation duy nhất của `Window` trong Android UI framework.
+- **`Window` / `PhoneWindow`**: Đại diện cho một cửa sổ hiển thị cấp cao nhất. `PhoneWindow` là implementation nội bộ thường gặp của `Window` (không dùng chi tiết này như API contract) trong Android UI framework.
 - **`DecorView`**: Là root View thực sự (kế thừa từ `FrameLayout`). Nó chứa `status_bar`, `navigation_bar`, `action_bar` và một ViewGroup đặc biệt có id `android.R.id.content`.
 - **`setContentView(layoutResID)`**: Khi gọi hàm này, layout XML của bạn được `LayoutInflater` chuyển đổi thành cây View và gắn trực tiếp vào `android.R.id.content`.
 - **`ViewRootImpl`**: Cầu nối giữa Window Manager và hệ thống View hierarchy, chịu trách nhiệm xử lý các phase: `Measure` -> `Layout` -> `Draw` và chuyển giao input events từ hardware đến View.
@@ -67,7 +67,7 @@ Một `Activity` không trực tiếp vẽ các View lên màn hình, mà nó ho
 #### Kịch bản 1: Mở Activity B từ Activity A
 1. `A.onPause()` *(A chuẩn bị nhường foreground, chưa dừng hoàn toàn)*
 2. `B.onCreate()` -> `B.onStart()` -> `B.onResume()` *(B hiển thị và sẵn sàng tương tác)*
-3. `A.onStop()` *(Chỉ khi B đã hoàn thành vẽ frame đầu tiên và che khuất hoàn toàn A, A mới chuyển sang onStop)*
+3. `A.onStop()` *(Trong chuyển màn toàn màn hình thông thường, A dừng khi không còn hiển thị; đây không phải cam kết về frame timing cho mọi window mode)*
 
 > **Lưu ý quan trọng:** Không thực hiện các tác vụ nặng (như lưu DB, serialize data lớn) trong `onPause()` vì nó trực tiếp làm chậm thời gian mở màn hình tiếp theo (gây app freeze/jank).
 
@@ -115,7 +115,7 @@ Fragment View:                        +--> [onCreateView] -> [onViewCreated] -> 
 2. **System-Initiated Process Death (Low Memory Killer - LMK)**:
    - Khi app ở background, OS có thể kill toàn bộ process của app để lấy RAM cho app khác.
    - `ViewModel` và toàn bộ singleton trong RAM bị mất hoàn toàn.
-   - **Cứu cánh duy nhất:** `SavedStateHandle` (tích hợp trong ViewModel) hoặc `onSaveInstanceState(Bundle)` (giới hạn kích thước nhỏ < 50KB).
+   - **Phục hồi:** saved state cho query/ID/UI state nhỏ; persistent storage/backend cho dữ liệu cần giữ lâu dài. Không có giới hạn an toàn phổ quát “50KB” áp cho mọi saved state; tránh payload lớn và xét Bundle/IPC constraints.
 
 ---
 
@@ -309,12 +309,12 @@ viewLifecycleOwner.lifecycleScope.launch {
 Các chiến lược triển khai:
 1. **Chiến lược `show()` / `hide()` (Giữ state trong RAM)**:
    - *Cách làm:* Khởi tạo cả 5 Fragment (hoặc lazy-load khi tab được click lần đầu) qua `add()`, sau đó dùng `show(currentFragment)` và `hide(otherFragments)`.
-   - *Ưu điểm:* Chuyển tab tức thì (0ms latency), giữ nguyên 100% trạng thái scroll, input text.
+   - *Ưu điểm:* Giữ View hierarchy giúp tránh tạo lại khi chuyển tab, thường giữ scroll/input trong View; vẫn phải đo latency và xử lý phục hồi sau mất process.
    - *Nhược điểm:* Tốn RAM do giữ cả 5 cây View hierarchy trong bộ nhớ. Phải override `onHiddenChanged()` để pause video/camera/animations khi tab bị ẩn.
 2. **Chiến lược Multiple Back Stacks (Jetpack Navigation Component - Khuyên dùng)**:
    - Hỗ trợ từ Navigation 2.4.0+ thông qua cơ chế `saveState` và `restoreState`.
    - Khi chuyển tab, Fragment cũ bị hủy View để giải phóng bộ nhớ, nhưng toàn bộ Back Stack và UI state của tab đó được serialize và lưu lại.
-   - Khi quay lại tab cũ, state được restore tự động hoàn hảo mà không tốn RAM chạy ngầm.
+   - Khi quay lại tab cũ, state được restore theo cơ chế saved state/navigation; dữ liệu ngoài cơ chế đó và tài nguyên chạy ngầm vẫn cần ownership/cleanup đúng.
 
 ---
 
@@ -359,7 +359,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
   5. `A.onStop()`
 - **Lý do A không gọi `onStop()` ngay:**
   - Android ưu tiên **trải nghiệm thị giác liền mạch**. Nếu A gọi `onStop()` và hủy UI quá sớm trong khi B vẫn đang inflate layout XML hoặc khởi tạo View, màn hình sẽ bị hiện tượng màn hình đen (black screen/blank screen) hoặc giật khung hình (frame drop).
-  - Hệ điều hành đợi cho tới khi Window của B được SurfaceFlinger vẽ xong khung hình đầu tiên và che khuất hoàn toàn Window của A, lúc này A mới an toàn chuyển sang trạng thái `onStop()`.
+  - Dùng điều kiện visibility để giải thích onStop; không suy ra timestamp frame đầu tiên hoặc hành vi mọi multi-window/translucent transition từ thứ tự callback thông thường.
 
 ---
 
@@ -369,7 +369,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
   - `onBackPressed()` là cơ chế chặn phím cứng/gesture trực tiếp nhưng không hỗ trợ **Predictive Back Animation** (tính năng từ Android 13/14 cho phép người dùng vuốt nhẹ mép màn hình để xem trước màn hình phía sau trước khi quyết định thả tay để back).
 - **Cơ chế `OnBackPressedDispatcher`:**
   - Tách rời logic xử lý Back Navigation ra thành các callback độc lập có thể đăng ký ở bất kỳ đâu (Activity, Fragment, Custom View, Compose).
-  - Tích hợp chặt chẽ với `LifecycleOwner`: Khi Fragment bị `STOPPED` hoặc `DESTROYED`, callback tự động bị disable hoặc gỡ bỏ, chống memory leak hoàn toàn.
+  - Tích hợp chặt chẽ với `LifecycleOwner`: Khi Fragment bị `STOPPED` hoặc `DESTROYED`, callback tự động bị disable hoặc gỡ bỏ, giúp quản lý callback theo lifecycle; các reference/job khác vẫn cần cleanup đúng.
 
 ```kotlin
 requireActivity().onBackPressedDispatcher.addCallback(
@@ -400,9 +400,9 @@ Nhiều lập trình viên nhầm lẫn giữa việc nhấn nút "Stop" trong A
    ```bash
    adb shell am kill <package_name>
    ```
-   *(Lưu ý: `am kill` chỉ kill process khi app đang ở background, mô phỏng chính xác hành vi của Low Memory Killer).*
+   *(Lưu ý: `am kill` chỉ kill process khi app đang ở background, hữu ích để thử mất process khi background, nhưng không mô phỏng mọi chi tiết của hệ thống/OEM).*
 4. Nhấn vào app trong màn hình Recent Apps để mở lại.
-5. **Kiểm tra:** Nếu app bị crash (do `NullPointerException` từ ViewModel rỗng hoặc Intent arguments thiếu) -> Xử lý chưa đạt chuẩn Process Death. Nếu app hiển thị lại đúng dữ liệu ban đầu -> App đã được quản lý state an toàn với `SavedStateHandle` / `Bundle`.
+5. **Kiểm tra:** Nếu app bị crash (do `NullPointerException` từ ViewModel rỗng hoặc Intent arguments thiếu) -> Xử lý chưa đạt chuẩn Process Death. Nếu app phục hồi đúng theo yêu cầu, kịch bản đó đã đạt; tiếp tục kiểm tra missing/stale data, network error và các state khác, không suy ra mọi restoration path đều an toàn.
 
 ---
 
@@ -416,3 +416,6 @@ Trong mô hình Multi-module (`:app`, `:feature:login`, `:feature:dashboard`, `:
      - Đặt interface điều hướng trong `:core:navigation` (ví dụ: `interface DashboardNavigator { fun openDashboard(context: Context) }`).
      - Module `:app` (module tổng phụ thuộc tất cả feature) sẽ implement interface này và inject vào Feature Login thông qua Dagger/Hilt.
      - Feature Login chỉ gọi `dashboardNavigator.openDashboard(context)` mà không cần biết chi tiết class Activity hay Fragment của Dashboard.
+
+
+Đọc sâu: [State recovery và ma trận kiểm chứng](./state-recovery.md), [Context/ownership](./context-memory.md).

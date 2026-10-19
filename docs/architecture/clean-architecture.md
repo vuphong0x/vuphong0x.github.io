@@ -1,61 +1,60 @@
-# Clean Architecture
+---
+title: Clean Architecture và dependency boundaries
+---
 
-Clean Architecture, conceptualized by Robert C. Martin (Uncle Bob), is a software design philosophy that separates the elements of a design into ringed layers. The fundamental overriding rule is the **Dependency Rule**: Source code dependencies must point only *inward*, toward higher-level policies.
+# Clean Architecture: chọn boundary theo vấn đề
 
-## The Three Main Layers in Android
+Clean Architecture đặt dependency của source code hướng về policy/abstraction ổn định hơn. Trong Android, một thiết kế thường tách UI, logic nghiệp vụ và nguồn dữ liệu, nhưng không có yêu cầu mọi app phải có đúng ba Gradle module hoặc một UseCase cho mỗi hàm repository.
 
-### 1. Presentation Layer
-- **Components:** Activities, Fragments, Composables, ViewModels.
-- **Responsibility:** Draws UI and handles user input.
-- **Dependencies:** Depends on the Domain Layer. Knows nothing about the Data Layer.
+## 1. Dependency lúc compile khác lời gọi lúc chạy {#dependencies}
 
-### 2. Domain Layer (The Core)
-- **Components:** UseCases (Interactors), Domain Models, Repository Interfaces.
-- **Responsibility:** Contains the pure business logic of the app.
-- **Dependencies:** **Zero dependencies on Android frameworks or other layers.** It is pure Kotlin/Java code. This makes testing business logic incredibly fast and pure.
+```text
+:feature:checkout → :domain:orders ← :data:orders
+                            ↑
+:app ghép implementation và dependency injection
+```
 
-### 3. Data Layer
-- **Components:** Repository Implementations, Data Sources (Room DAOs, Retrofit interfaces), DTOs (Data Transfer Objects).
-- **Responsibility:** Fetches data from external sources and maps DTOs to pure Domain Models.
-- **Dependencies:** Depends on the Domain Layer (implements its interfaces).
+Trong thiết kế này, domain khai báo contract cần thiết; data implement contract. Lúc chạy, ViewModel gọi use case/repository và thực thi data implementation. Việc lời gọi đi tới database không có nghĩa domain phải import Room.
 
-## Use Cases (Interactors)
-A Use Case encapsulates a single, specific task (e.g., `GetUserProfileUseCase`, `PerformLoginUseCase`).
-- They make the ViewModel much smaller and purely responsible for formatting data to the UI.
-- They ensure business logic is highly reusable across different ViewModels.
+Tên thư mục không tạo boundary. Nếu domain import DTO Retrofit hoặc UI phải xử lý cursor Room, abstraction vẫn bị lộ dù project có đủ folder `presentation/domain/data`.
+
+## 2. Khi nào thêm UseCase? {#use-cases}
+
+Một UseCase có ích khi đóng gói policy dùng lại hoặc phối hợp nhiều nguồn. Ví dụ “đặt hàng” cần kiểm tra đầu vào, dùng cart snapshot, tạo logical request ID và phân loại kết quả chưa được xác nhận. Một lớp `GetUserUseCase` chỉ gọi đúng `repository.getUser()` có thể chưa thêm giá trị trong app CRUD nhỏ.
+
+Android architecture guidance coi domain layer là tùy chọn theo độ phức tạp/reuse. Đừng bắt UI import data implementation để né abstraction; cũng đừng tạo lớp pass-through chỉ để đáp ứng sơ đồ.
+
+Nguồn: [Architecture recommendations](https://developer.android.com/topic/architecture/recommendations).
+
+## 3. Contract nhỏ có semantics rõ
 
 ```kotlin
-// Inner layer: Domain
-class GetUserUseCase(private val repository: UserRepository) {
-    suspend operator fun invoke(id: String): User {
-        return repository.getUser(id)
-        // Add business validation here
-    }
+interface Orders {
+    suspend fun submit(draft: OrderDraft, requestId: String): SubmitResult
+    fun observeOrder(id: String): Flow<Order>
+}
+
+sealed interface SubmitResult {
+    data class Confirmed(val orderId: String) : SubmitResult
+    data class Rejected(val reason: String) : SubmitResult
+    data class PendingConfirmation(val requestId: String) : SubmitResult
 }
 ```
 
-## Dependency Inversion
+Đây là model minh họa; app phải định nghĩa OrderDraft/Order và mapping lỗi. `PendingConfirmation` biểu diễn timeout không rõ server đã commit hay chưa. Nếu chỉ có `Boolean`, UI có thể retry với ID mới và tạo đơn trùng.
 
-Because the Domain layer cannot depend on the Data layer, we use the Dependency Inversion Principle.
-1. The Domain layer defines an **Interface** (`UserRepository`).
-2. The Domain layer's UseCase relies on this Interface.
-3. The Data layer provides the **Implementation** (`UserRepositoryImpl`) of that interface.
-4. Dependency Injection (e.g., Hilt/Dagger) wires them together at runtime.
+Domain không cần biết HTTP status nào tương ứng một rejection cụ thể. Data implementation chuyển transport/API contract thành domain semantics, đồng thời giữ cancellation đúng. Không bắt mọi repository luôn trả Flow<Result<T>>; chọn one-shot hay observation theo nhu cầu caller.
 
-## Benefits & Drawbacks
-**Benefits:**
-- Highly testable (Domain layer can be tested with basic JUnit tests; no Robolectric/emulators required).
-- Decoupled from frameworks (You can swap Room for Realm without altering business logic).
-- Scalable for large teams.
+## 4. Model riêng khi có lý do riêng
 
-**Drawbacks:**
-- Over-engineering for simple apps.
-- Results in many classes mapping identical properties (DTO -> Domain Model -> UI Model).
+DTO thể hiện API contract; entity thể hiện schema/cache; UI state thể hiện nhu cầu render. Tách model giúp thay đổi độc lập khi các contract khác nhau, nhưng không tự bảo vệ khỏi mọi thay đổi backend: field mất ý nghĩa hoặc đổi semantics vẫn có thể buộc đổi domain.
 
-## Interview Questions
+Không copy cùng bộ field qua bốn lớp mà không có policy/mapping hữu ích. Ngược lại, expose entity mutable ra UI có thể cho phép sửa state ngoài owner và làm test khó tin cậy. Ghi lại vì sao từng model tồn tại.
 
-**Q: Explain the Dependency Rule in Clean Architecture.**
-*Answer:* Dependencies must point inwards. Nothing in an inner circle can know anything at all about something in an outer circle. Specifically, our pure Domain layer cannot import Retrofit, Room, or Android Context.
+## 5. Test boundary và chi phí thay đổi
 
-**Q: Why do we have separate models (DTO, Domain Model, UI State)? Doesn't it just create boilerplate?**
-*Answer:* It prevents changes in an external API from breaking the UI. If the backend changes a JSON key from `user_age` to `age_in_years`, only the API DTO and Mapper change. The Domain Model and UI Model remain unaffected. The boilerplate pays off heavily in maintenance stability.
+Dùng fake Orders cho test state holder; test data implementation với server/database kiểm soát được; test mapping rejection và unknown outcome. Một test ViewModel không chứng minh HTTP client hoặc migration hoạt động, nên cần kiểm chứng đúng tầng.
+
+**Bài tập:** thiết kế checkout có offline cart. Viết dependency graph, ba kết quả SubmitResult và một quyết định có/không dùng UseCase. Giải thích phần nào phải thay đổi nếu backend chuyển protocol mà semantics đặt hàng vẫn giữ nguyên.
+
+Đọc tiếp: [UDF và state/event](./ui-state-events.md), [modularization](./modularization.md), [offline-first](../data/offline-first.md), [capstone](../interview/senior-capstone.md).

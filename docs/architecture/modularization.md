@@ -1,60 +1,70 @@
-# Modularization & Dependency Injection
+---
+title: Modularization, DI và build performance
+---
 
-As an Android app grows, a monolithic architecture (everything in an `app` module) becomes incredibly slow to build, hard to maintain, and difficult for multiple teams to work on. Modularization solves this.
+# Module hóa theo boundary và bằng chứng
 
-## App Modularization
+Tách module có thể cải thiện encapsulation, ownership, reuse và khả năng xử lý công việc độc lập. Nó cũng có chi phí configuration, plugin, code generation và dependency graph. Không có quy luật “càng nhiều module càng build nhanh”.
 
-Modularization is the practice of splitting a single codebase into separate, independent Gradle modules.
+## 1. Bắt đầu bằng điểm thay đổi và owner {#boundaries}
 
-### Benefits
-1. **Build Times:** Gradle runs tasks in parallel and caches outputs. If you change code in the `feature:login` module, Gradle doesn't recompile the `feature:profile` module.
-2. **Encapsulation:** You can hide internal classes using the `internal` visibility modifier, ensuring other modules can't access them and create spaghetti dependencies.
-3. **Dynamic Features:** Enables using Android App Bundles to download certain features purely on-demand to reduce initial app size.
+Một graph minh họa:
 
-### Splitting Strategies
-- **By Layer:** `app` -> `domain` -> `data`. (Good for simple projects, but eventually `data` becomes a massive bottleneck).
-- **By Feature:** `feature:login`, `feature:checkout`, `core:network`, `core:ui`. (Recommended. Each feature contains its own presentation, domain, and data logic).
-
-## Dependency Injection (DI)
-
-DI is a design pattern used to implement Inversion of Control. Instead of a class creating its own dependencies, they are provided to it.
-
-### Why DI?
-- Extremely easy testing (you can easily pass mocked implementations).
-- Reduces class coupling.
-- Manages singletons efficiently.
-
-### Hilt / Dagger
-**Dagger 2** is a compile-time DI framework. It generates highly optimized code without using slow reflection. However, it requires intense boilerplate.
-
-**Hilt** is Google's official wrapper built on top of Dagger. It provides predefined standard components (e.g., `SingletonComponent`, `ViewModelComponent`, `ActivityComponent`) out of the box.
-
-```kotlin
-// Defining a dependency
-@Module
-@InstallIn(SingletonComponent::class)
-object NetworkModule {
-    @Provides
-    @Singleton
-    fun provideRetrofit(): Retrofit = Retrofit.Builder().build()
-}
-
-// Injecting into a ViewModel
-@HiltViewModel
-class MainViewModel @Inject constructor(
-    private val api: MyApi // Automatically provided by Hilt
-) : ViewModel()
+```text
+:app → :feature:checkout → :core:orders-api
+:app → :feature:catalog  → :core:catalog-api
+:app → :data:orders     → :core:orders-api
 ```
 
-### Koin
-A wildly popular pragmatic lightweight dependency injection framework built entirely in Kotlin.
-- Doesn't generate code; relies on inline functions and a DSL at runtime.
-- Marginally slower at startup compared to Dagger/Hilt, but vastly faster build times and zero boilerplate.
+`:app` là composition root ghép implementation. Checkout không phụ thuộc UI của Catalog chỉ để nhận một product ID. Contract navigation/data có thể đặt ở boundary nhỏ phù hợp; đừng biến `core:utils` thành module chứa mọi thứ và mọi dependency.
 
-## Interview Questions
+Với logic không cần Android API/resource, cân nhắc Kotlin/JVM module để giảm overhead. Một feature không nhất thiết là dynamic feature; Play Feature Delivery cần cấu hình và yêu cầu riêng.
 
-**Q: When would you choose Koin over Hilt/Dagger?**
-*Answer:* Koin is deeply pragmatic. I would choose it for a pure Kotlin project focusing on rapid development, smaller team sizes, and when compile-times are a major bottleneck (since Dagger's annotation processing (KAPT/KSP) slows down builds). I would stick to Hilt for massive enterprise apps where startup performance is extremely critical and compile-time safety is mandated.
+Nguồn: [Guide to modularization](https://developer.android.com/topic/modularization), [common patterns](https://developer.android.com/topic/modularization/patterns).
 
-**Q: What is the difference between `api` and `implementation` in a `build.gradle` file?**
-*Answer:* `implementation` leaks the dependency only to the module it is declared in (faster compilation due to isolated compilation boundaries). `api` leaks the dependency transitively to other modules that depend on this one. You should almost always use `implementation` unless you explicitly want to expose that library's API to consumers of your module.
+## 2. api và implementation không phải access modifier {#gradle-api}
+
+`api` expose dependency tới compile classpath của consumer; `implementation` giữ dependency ở implementation classpath theo plugin contract. Tuy nhiên, nếu public API của module dùng type của thư viện đó, consumer vẫn cần truy cập type để compile; “chỉ đổi api thành implementation” không sửa một public boundary đang lộ type.
+
+Kotlin `internal` giới hạn theo module biên dịch; nó khác việc Gradle expose dependency. Review cả public signature, plugin/application mode và ABI thay vì chỉ tên configuration.
+
+## 3. Dependency injection theo lifetime {#di}
+
+DI nghĩa là object nhận dependency thay vì tự tạo chúng. Constructor injection thường đủ để test class bằng fake; không cần Hilt cho mọi hàm thuần túy.
+
+Hilt/Dagger cung cấp graph và lifecycle integration cụ thể. Scope phải khớp lifetime: singleton không giữ Activity/View; dependency của ViewModel không được capture View cũ qua callback. Runtime DI hoặc cơ chế compile-time có tradeoff khác nhau; đo startup/build và đánh giá validation/tooling của phiên bản dùng thực tế thay vì khẳng định một framework luôn nhanh hơn.
+
+```kotlin
+class CalculateTotal(private val prices: PriceCatalog) {
+    fun forItems(ids: List<String>): Long = ids.sumOf(prices::minorUnits)
+}
+
+interface PriceCatalog {
+    fun minorUnits(id: String): Long
+}
+```
+
+Ví dụ dùng minor currency units để minh họa một pure boundary; chưa xử lý thuế, rounding hay overflow của nghiệp vụ thực tế. Test có thể truyền fake PriceCatalog trực tiếp, không cần khởi toàn bộ app graph.
+
+Nguồn integration: [Hilt](https://developer.android.com/training/dependency-injection/hilt-android).
+
+## 4. Đo build trước và sau {#build-evidence}
+
+Ghi rõ phiên bản JDK/Gradle/AGP, loại máy, cache và tác vụ đo. So sánh ít nhất clean build, no-change build và incremental change ở một feature/contract được chia sẻ. Warm daemon/cache và cold run là các điều kiện khác nhau.
+
+| Thay đổi thử | Câu hỏi cần trả lời |
+| --- | --- |
+| Sửa implementation của checkout | Những task/module nào thực sự chạy lại? |
+| Đổi public type dùng ở nhiều feature | ABI change lan rộng tới đâu? |
+| Thêm module có codegen | Chi phí configuration/codegen tăng bao nhiêu? |
+| Tách pure Kotlin khỏi Android module | Task và classpath nào được giảm? |
+
+Không suy ra kết quả chỉ từ số module hoặc một lần build. Dùng build report/scan phù hợp chính sách dữ liệu của team; không upload thông tin build nhạy cảm tùy tiện.
+
+## 5. Chuyển đổi từng bước
+
+Chọn một boundary có lợi ích rõ, thêm characterization/contract tests, tách với dependency hướng rõ rồi đo lại. Theo dõi thời gian review, ownership và cycle dependency cùng build time. Nếu rollback được extraction mà không thay behavior, rollout ít rủi ro hơn một lần rewrite toàn bộ app.
+
+**Bài tập:** đề xuất tách checkout khỏi monolith. Viết một decision record gồm vấn đề, hai phương án, graph, phép đo baseline, kết quả mong đợi và điều kiện dừng nếu chi phí cao hơn lợi ích.
+
+Đọc tiếp: [Clean Architecture](./clean-architecture.md), [legacy code](../real-world/legacy-code.md), [capstone](../interview/senior-capstone.md).

@@ -1,63 +1,67 @@
-# Model-View-ViewModel (MVVM)
+---
+title: MVVM và screen state có thể kiểm chứng
+---
 
-MVVM is the officially recommended architecture for Android. It robustly separates the user interface logic from the business logic.
+# MVVM: phân quyền sở hữu state cho màn hình
 
-## Core Components
+Trong mô hình MVVM thường dùng trên Android, UI render state và chuyển action tới ViewModel; ViewModel phối hợp dữ liệu để tạo screen state. MVVM không quy định mọi logic đều phải nằm trong ViewModel hoặc mọi UI chỉ được có một Flow. Quan trọng là source of truth và lifetime rõ ràng.
 
-### 1. View (Activity/Fragment/Composable)
-- Responsible exclusively for displaying data on the screen and routing user events.
-- Has no business logic.
-- Observes the ViewModel (via `StateFlow` or `LiveData`) to update the UI.
-
-### 2. ViewModel
-- Transforms domain data into UI states.
-- Contains business logic specific to that screen.
-- Crucially, it **survives configuration changes** (like screen rotations) meaning data doesn't have to be refetched.
-- Has no reference to the View (`Context`, `Activity`, `View`). Passing these into a ViewModel creates massive memory leaks.
-
-### 3. Model (Data/Domain Layer)
-- Defines where data comes from (Database, Network API) via Repositories.
-- Abstracted away from the ViewModel. 
-
-## Unidirectional Data Flow (UDF)
-The core pattern within modern MVVM in Android.
-- **State flows down:** ViewModel exposes an immutable `StateFlow<UiState>`. The View observes it.
-- **Events flow up:** View calls public methods on the ViewModel (e.g., `viewModel.onLoginClicked()`).
-
-## Example (Modern Approach)
+## 1. State cho một thao tác đăng nhập
 
 ```kotlin
-// 1. Define State
-data class LoginState(val isLoading: Boolean = false, val error: String? = null)
+sealed interface LoginState {
+    data object Editing : LoginState
+    data object Loading : LoginState
+    data object Authenticated : LoginState
+    data class Rejected(val reason: String) : LoginState
+}
 
-// 2. ViewModel
-class LoginViewModel(private val repository: LoginRepository) : ViewModel() {
-    private val _uiState = MutableStateFlow(LoginState())
-    val uiState: StateFlow<LoginState> = _uiState.asStateFlow()
+class LoginViewModel(private val sessions: Sessions) : ViewModel() {
+    private val _state = MutableStateFlow<LoginState>(LoginState.Editing)
+    val state: StateFlow<LoginState> = _state.asStateFlow()
 
-    fun login() {
-        _uiState.update { it.copy(isLoading = true) }
+    // UI gọi trên main thread.
+    fun login(credentials: Credentials) {
+        if (_state.value == LoginState.Loading) return
+        _state.value = LoginState.Loading
         viewModelScope.launch {
             try {
-                repository.doLogin()
-                // Navigate to home (via SharedFlow event or state update)
-            } catch(e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _state.value = when (val result = sessions.login(credentials)) {
+                    SignIn.Accepted -> LoginState.Authenticated
+                    is SignIn.Rejected -> LoginState.Rejected(result.reason)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: IOException) {
+                _state.value = LoginState.Rejected("Chưa thể kết nối")
             }
         }
     }
 }
 ```
 
-## Difference from MVC and MVP
-- **MVC (Model-View-Controller):** The Controller heavily manipulates the View. Hard to test.
-- **MVP (Model-View-Presenter):** The Presenter holds an interface to the View and calls methods like `view.showLoading()`. Tight coupling makes it harder to scale than MVVM.
-- **MVVM:** View observes ViewModel. ViewModel knows absolutely nothing about the View. Perfect for reactive frameworks like Compose.
+`Sessions`, Credentials và SignIn là contract do app định nghĩa; login phải main-safe và xử lý session persistence theo yêu cầu. Đây là ví dụ transition, không phải authentication SDK hoàn chỉnh. Chuỗi UI cần localization khi tích hợp. Không đưa credential vào saved state/log chỉ để thuận tiện.
 
-## Interview Questions
+Set Loading trước launch giúp các action đồng bộ liên tiếp trên main thread thấy thao tác đang chạy. Nếu caller có thể gọi từ nhiều thread, guard này không còn là cơ chế đồng bộ đủ; contract phải cấm hoặc serialize action đúng cách.
 
-**Q: How does a ViewModel survive screen rotations?**
-*Answer:* The `ViewModelStoreOwner` (usually the Activity or Fragment) retains the ViewModel instance during configuration changes. While the Activity is destroyed and recreated, the system keeps the `ViewModelStore` alive in memory and attaches it to the new Activity instance.
+## 2. ViewModel không phải nơi giữ View {#lifetime}
 
-**Q: Can a ViewModel hold a reference to a `Context`?**
-*Answer:* No. Holding an Activity Context inside a ViewModel causes an immediate memory leak, because the ViewModel outlives the Activity. If an application context is absolutely needed, you should extend `AndroidViewModel(application)`, but it's broadly recommended to pass dependencies containing Context directly to the classes that need them instead of injecting Context into ViewModels.
+ViewModel có thể sống qua configuration change và bị clear theo owner. Nó không sống qua process death. Không giữ Activity/binding để render sau request; expose state và để UI hiện tại collect theo lifecycle.
+
+Application Context không có cùng vấn đề lifetime với Activity Context, nhưng không vì thế mọi ViewModel nên nhận Context. Inject abstraction cần thiết như repository/resource policy ở đúng tầng. Context không mặc nhiên gây leak; leak xuất hiện khi reference sống quá lifetime đối tượng được giữ.
+
+## 3. Kết quả, navigation và error
+
+Authenticated là state của ví dụ; nếu UI điều hướng theo nó thì cần kiểm soát destination/back stack khi collect lại. Không phát event qua SharedFlow(replay=0) rồi mặc định kết quả quan trọng sẽ đến UI sau background.
+
+Cancellation của request phải lan theo scope; thông báo lỗi network chỉ dành cho lỗi mạng dự kiến. Một catch(Exception) không phân biệt cancellation có thể làm màn hình báo lỗi khi user đã rời đi. Lỗi lập trình/protocol cần boundary xử lý và quan sát riêng.
+
+## 4. Test những gì?
+
+Test Editing → Loading → Authenticated/Rejected, chống submit trùng theo contract, lỗi I/O, cancellation và session đổi trong lúc request. Fake Sessions có thể trì hoãn kết quả để assert Loading, không chỉ trả response ngay và assert state cuối.
+
+Tách presentation test khỏi integration test xác thực HTTP/credential storage. Một ViewModel test xanh không chứng minh login an toàn trên thiết bị thật.
+
+Nguồn: [Architecture recommendations](https://developer.android.com/topic/architecture/recommendations), [ViewModel](https://developer.android.com/topic/libraries/architecture/viewmodel).
+
+Đọc sâu: [UDF và event delivery](./ui-state-events.md), [MVVM/MVI](./mvvm-vs-mvi.md), [test strategy](../testing/test-strategy.md), [security](../security/security-model.md).

@@ -39,3 +39,7 @@ You can extend existing views (`TextView`) or `View`/`ViewGroup` directly.
 
 **Q: Explain how `DiffUtil` works.**
 *Answer:* `DiffUtil` is a utility class that calculates the difference between two lists and outputs a list of update operations that converts the first list into the second. It determines exactly which items were added, removed, or changed, drastically improving RecyclerView update performance compared to `notifyDataSetChanged()`.
+
+## Đọc sâu và thực hành
+
+[Custom View: MeasureSpec, Canvas và accessibility](./custom-view.md).
