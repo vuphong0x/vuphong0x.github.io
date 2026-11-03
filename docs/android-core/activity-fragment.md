@@ -1,13 +1,14 @@
-# Activity & Fragment - Kiến thức cốt lõi & Câu hỏi phỏng vấn Senior
+# Activity & Fragment: Bản chất kiến trúc & Cẩm nang Senior
 
-`Activity` và `Fragment` là hai thành phần giao diện nền tảng trong hệ sinh thái Android. Đối với kỹ sư cấp độ **Senior / Lead**, việc nắm vững không chỉ dừng lại ở các hàm lifecycle cơ bản mà phải hiểu rõ **bản chất kiến trúc ngầm (under the hood)**, cơ chế quản lý bộ nhớ, State Restoration, Transaction Pipeline của `FragmentManager`, và các edge-cases thực tế khi tối ưu ứng dụng quy mô lớn.
+`Activity` và `Fragment` là hai thành phần nền tảng xây dựng nên giao diện người dùng trong Android. Ở cấp độ Senior, việc nắm rõ không chỉ dừng lại ở các hàm lifecycle cơ bản, mà quan trọng là hiểu rõ **nguyên lý vận hành bên dưới (under the hood)**: cách hệ thống vẽ UI lên màn hình, cơ chế điều phối transaction của `FragmentManager`, sự lệch pha lifecycle dẫn đến rò rỉ bộ nhớ, và chiến lược khôi phục trạng thái khi hệ thống thu hồi tài nguyên.
 
 ---
 
 ## 1. Bản chất kiến trúc của Activity & Fragment
 
-### 1.1 Activity Under the Hood
-Một `Activity` không trực tiếp vẽ các View lên màn hình, mà nó hoạt động như một bộ điều phối (orchestrator) và là điểm kết nối giữa ứng dụng với hệ điều hành Android (`ActivityTaskManagerService` - ATMS và `WindowManagerService` - WMS).
+### 1.1 Activity Under the Hood: Từ Code đến Pixel trên màn hình
+
+Một quan niệm sai lầm phổ biến là nghĩ rằng `Activity` trực tiếp vẽ các View lên màn hình. Trên thực tế, `Activity` đóng vai trò là một **bộ điều phối (orchestrator)** — điểm kết nối giữa ứng dụng với hệ điều hành Android (`ActivityTaskManagerService` - ATMS và `WindowManagerService` - WMS).
 
 ```
 +-------------------------------------------------------------+
@@ -21,164 +22,222 @@ Một `Activity` không trực tiếp vẽ các View lên màn hình, mà nó ho
 |  |  |  +---------------------+  |  (Layout của bạn)|  |  |  |
 |  |  |                           +------------------+  |  |  |
 |  |  +-------------------------------------------------+  |  |
-|  +-------------------------------------------------------+  |
+|  |  +-------------------------------------------------------+  |
 +-------------------------------------------------------------+
                                |
-                        ViewRootImpl
+                         ViewRootImpl
                                |
-                  WindowManagerService (WMS)
+                   WindowManagerService (WMS)
                                |
                           SurfaceFlinger
 ```
 
-- **`Window` / `PhoneWindow`**: Đại diện cho một cửa sổ hiển thị cấp cao nhất. `PhoneWindow` là implementation nội bộ thường gặp của `Window` (không dùng chi tiết này như API contract) trong Android UI framework.
-- **`DecorView`**: Là root View thực sự (kế thừa từ `FrameLayout`). Nó chứa `status_bar`, `navigation_bar`, `action_bar` và một ViewGroup đặc biệt có id `android.R.id.content`.
-- **`setContentView(layoutResID)`**: Khi gọi hàm này, layout XML của bạn được `LayoutInflater` chuyển đổi thành cây View và gắn trực tiếp vào `android.R.id.content`.
-- **`ViewRootImpl`**: Cầu nối giữa Window Manager và hệ thống View hierarchy, chịu trách nhiệm xử lý các phase: `Measure` -> `Layout` -> `Draw` và chuyển giao input events từ hardware đến View.
+Hành trình từ khi gọi `setContentView()` đến khi xuất hiện pixel trên màn hình trải qua các thành phần:
+
+1. **`Window` & `PhoneWindow`**:
+   - `Window` là một abstract class đại diện cho một cửa sổ hiển thị cấp cao nhất trên màn hình.
+   - `PhoneWindow` là class triển khai thực tế (implementation) duy nhất của `Window` trong Android UI framework, quản lý toàn bộ giao diện của một Activity.
+
+2. **`DecorView`**:
+   - Là View gốc (root view) của toàn bộ cây View trong Window, kế thừa từ `FrameLayout`.
+   - `DecorView` chia thành hai phần chính: vùng dành cho thanh hệ thống (Status Bar, Navigation Bar, Action Bar) và một container đặc biệt có id `android.R.id.content`.
+
+3. **`setContentView(layoutResID)`**:
+   - Khi gọi hàm này, `LayoutInflater` sẽ đọc file XML của bạn, khởi tạo các đối tượng View tương ứng và gắn cây View đó vào làm con của `android.R.id.content`.
+
+4. **`ViewRootImpl` & Render Pipeline**:
+   - `ViewRootImpl` là mắt xích cầu nối giữa Window Manager và cây View của ứng dụng.
+   - Nó kích hoạt quy trình đo đạc và vẽ UI gồm 3 bước: `Measure` $\rightarrow$ `Layout` $\rightarrow$ `Draw`.
+   - Kết quả vẽ được ghi vào một Surface buffer, sau đó gửi qua Binder IPC tới `SurfaceFlinger` — dịch vụ cấp hệ thống chịu trách nhiệm tổng hợp các layer từ nhiều nguồn (Status bar, Navigation bar, App Surface) rồi gửi tới phần cứng màn hình để hiển thị.
 
 ---
 
-### 1.2 Fragment Under the Hood
-`Fragment` không phải là một `Context` (khác với Activity). Bản chất Fragment là một **Controller** quản lý một cây View con độc lập và có vòng đời phụ thuộc vào Activity chứa nó.
+### 1.2 Fragment Under the Hood: Controller độc lập trên cây View
 
-- **Cơ chế đính kèm**: Fragment được gắn vào một `ViewGroup` container bên trong Activity thông qua `FragmentManager`.
-- **Phân tách Lifecycle**: Fragment có **hai vòng đời tách biệt**:
-  1. *Fragment Instance Lifecycle* (bắt đầu từ `onAttach` đến `onDetach`).
-  2. *Fragment View Lifecycle* (bắt đầu từ `onCreateView` đến `onDestroyView`).
+Khác với Activity, `Fragment` **không phải là một Context**. 
+
+Về bản chất, Fragment là một **Controller** quản lý một cây View con độc lập và được gắn vào một container (ViewGroup) bên trong Activity thông qua `FragmentManager`.
+
+- **Phụ thuộc vào Activity**: Fragment không thể tồn tại độc lập trên hệ điều hành. Toàn bộ thông điệp từ hệ thống (lifecycle event, input event, intent result) đều phải đi qua Activity trước khi được chuyển tiếp tới Fragment.
+- **Tính hai mặt của Lifecycle**: Fragment có **hai vòng đời tách biệt**:
+  1. *Fragment Instance Lifecycle* (vòng đời của đối tượng Java/Kotlin trong bộ nhớ): từ `onAttach()` đến `onDetach()`.
+  2. *Fragment View Lifecycle* (vòng đời của cây giao diện UI): từ `onCreateView()` đến `onDestroyView()`.
+
+Sự tách biệt này chính là nền tảng để Android tối ưu bộ nhớ thông qua Back Stack, nhưng cũng là nguồn cơn của lỗi rò rỉ bộ nhớ nếu không hiểu đúng.
 
 ---
 
-### 1.3 Single-Activity vs. Multi-Activity Architecture
+### 1.3 So sánh Single-Activity và Multi-Activity Architecture
 
-| Tiêu chí | Single-Activity Architecture (Modern) | Multi-Activity Architecture (Legacy) |
+Xu hướng hiện đại trong phát triển Android (kể từ khi Google giới thiệu Android Jetpack và Jetpack Compose) là chuyển dịch hoàn toàn từ **Multi-Activity** sang **Single-Activity Architecture**.
+
+| Tiêu chí | Single-Activity Architecture (Hiện đại) | Multi-Activity Architecture (Truyền thống) |
 | :--- | :--- | :--- |
-| **Cơ chế chuyển màn** | Swap Fragment / Composable trong cùng 1 Window | Hệ thống tạo Window mới, gọi qua IPC tới ATMS/WMS |
-| **Chi phí tài nguyên (Overhead)** | Rất nhẹ, tái sử dụng cùng Window & Process resources | Tốn RAM và CPU do mỗi Activity có Window, DecorView, ViewRootImpl riêng |
-| **Chia sẻ dữ liệu** | Đơn giản via Activity-scoped / NavGraph-scoped ViewModel | Phải serialize qua Intent/Bundle (giới hạn ~1MB TransactionTooLargeException) |
-| **Animation & Transitions** | Mượt mà (Shared Element, Fragment Transition, Compose Animation) | Phụ thuộc Window Transition của OS, khó custom phức tạp |
-| **Deep Link & Back Stack** | Dễ dàng quản lý tập trung qua Jetpack Navigation | Phức tạp khi phục hồi Task stack với nhiều Launch Mode |
+| **Cơ chế chuyển màn** | Thay thế Fragment / Composable trong cùng một Window | Hệ thống tạo Window mới, gọi liên tiến trình (IPC) tới ATMS và WMS |
+| **Tiêu tốn tài nguyên (Overhead)** | **Rất nhẹ**: Tái sử dụng Window, DecorView, ViewRootImpl và Process hiện tại | **Nặng**: Mỗi Activity tạo riêng một Window, DecorView, ViewRootImpl và phân bổ Surface mới |
+| **Chia sẻ dữ liệu** | **Rất linh hoạt**: Sử dụng chung Activity-scoped hoặc NavGraph-scoped ViewModel | **Hạn chế**: Phải serialize qua Intent/Bundle, dễ gặp `TransactionTooLargeException` nếu vượt quá giới hạn Binder (~1MB cho toàn process) |
+| **Hiệu ứng chuyển cảnh (Animation)** | Mượt mà, hỗ trợ tốt Shared Element Transitions và hiệu ứng cử chỉ phức tạp | Phụ thuộc vào Window Transition của hệ điều hành, khó đồng bộ mượt mà |
+| **Điều hướng & Deep Link** | Dễ dàng quản lý tập trung qua Jetpack Navigation Component | Phức tạp khi cấu hình cờ Intent (`FLAG_ACTIVITY_*`) và các thuộc tính `launchMode` |
 
 ---
 
-## 2. Vòng đời chuyên sâu & Cơ chế phục hồi trạng thái (Lifecycle & State Restoration)
+## 2. Vòng đời chuyên sâu & Cơ chế phục hồi trạng thái
 
-### 2.1 Thứ tự Lifecycle khi chuyển màn hình
+### 2.1 Cơ chế điều phối Lifecycle khi chuyển màn hình
 
-#### Kịch bản 1: Mở Activity B từ Activity A
-1. `A.onPause()` *(A chuẩn bị nhường foreground, chưa dừng hoàn toàn)*
-2. `B.onCreate()` -> `B.onStart()` -> `B.onResume()` *(B hiển thị và sẵn sàng tương tác)*
-3. `A.onStop()` *(Trong chuyển màn toàn màn hình thông thường, A dừng khi không còn hiển thị; đây không phải cam kết về frame timing cho mọi window mode)*
+#### Kịch bản 1: Activity A khởi chạy Activity B (Toàn màn hình)
 
-> **Lưu ý quan trọng:** Không thực hiện các tác vụ nặng (như lưu DB, serialize data lớn) trong `onPause()` vì nó trực tiếp làm chậm thời gian mở màn hình tiếp theo (gây app freeze/jank).
+Thứ tự kích hoạt các hàm callback diễn ra chính xác như sau:
 
-#### Kịch bản 2: Activity B là dạng Dialog/Translucent đè lên Activity A
-- `A.onPause()` -> `B.onCreate()` -> `B.onStart()` -> `B.onResume()`
-- **A KHÔNG gọi `onStop()`** vì A vẫn còn một phần hiển thị cho người dùng thấy phía sau Dialog/Translucent Window.
+```
+Activity A                  Hệ điều hành / Activity B
+    |                                   |
+[onPause()] -------------------------> | (A nhường foreground)
+    |                                   |
+    |                               [onCreate()]
+    |                               [onStart()]
+    |                               [onResume()]
+    |                                   | (B đã sẵn sàng tương tác)
+[onStop()] <--------------------------- | (A bị che khuất hoàn toàn)
+```
+
+**Tại sao A phải gọi `onPause()` trước khi B khởi tạo, nhưng `onStop()` lại gọi sau khi B đã `onResume()`?**
+- **A gọi `onPause()` trước**: Hệ thống cần đảm bảo Activity hiện tại dừng tương tác, tạm dừng animation và ngắt các tài nguyên độc quyền (như camera/mic) trước khi bàn giao quyền điều khiển cho màn hình mới.
+- **A chỉ gọi `onStop()` sau khi B đã `onResume()`**: Đây là cơ chế giữ trải nghiệm thị giác liền mạch. Nếu hệ thống vội vã gọi `onStop()` của A ngay khi B vừa tạo, người dùng sẽ thấy màn hình nhấp nháy hoặc hiện một khoảng đen (blank screen) trong khi B vẫn đang bận inflate layout XML. Khi B đã hoàn tất việc hiển thị và tương tác (`onResume`), A mới chính thức bước vào trạng thái dừng (`onStop`).
+
+> **Quy tắc hiệu năng:** Không bao giờ thực hiện các tác vụ tốn thời gian (ghi database, đọc file, mã hóa dữ liệu lớn) bên trong `onPause()`. Bất kỳ sự chậm trễ nào trong `onPause()` của A sẽ trực tiếp trì hoãn thời điểm xuất hiện của B, gây cảm giác ứng dụng bị đơ (jank/freeze).
+
+#### Kịch bản 2: Activity B là Dialog hoặc Màn hình trong suốt (Translucent)
+- Thứ tự: `A.onPause()` $\rightarrow$ `B.onCreate()` $\rightarrow$ `B.onStart()` $\rightarrow$ `B.onResume()`.
+- **Activity A KHÔNG BAO GIỜ gọi `onStop()`**, vì A vẫn còn hiển thị một phần cho người dùng thấy phía sau lớp giao diện của B.
 
 ---
 
-### 2.2 Fragment Lifecycle: Hai vòng đời riêng biệt
+### 2.2 Fragment Lifecycle: Bản chất của hai vòng đời riêng biệt
 
 ```
 Fragment Instance:  [onAttach] -> [onCreate] -----------------------------------------------------> [onDestroy] -> [onDetach]
                                       |                                                                   ^
 Fragment View:                        +--> [onCreateView] -> [onViewCreated] -> [onDestroyView] ----------+
                                                 ^                                      |
-                                                +-------- (Back Stack Pop/Recreate) ---+
+                                                +-------- (Khi Pop từ Back Stack) -----+
 ```
 
-- **Tại sao cần 2 vòng đời?** Khi một Fragment được đưa vào **Back Stack** (ví dụ qua `addToBackStack`):
-  - View của nó bị hủy (`onDestroyView()`) để giải phóng tài nguyên bộ nhớ UI.
-  - Instance của Fragment vẫn còn sống trong bộ nhớ để lưu giữ trạng thái logic.
-  - Khi user nhấn Back quay lại, `onCreateView()` và `onViewCreated()` được gọi lại, tạo mới cây View mà không gọi lại `onCreate()`.
+**Tại sao Fragment cần tách biệt View Lifecycle và Instance Lifecycle?**
+
+Câu trả lời nằm ở cơ chế **Back Stack** của `FragmentManager`:
+- Khi bạn chuyển sang màn hình khác và đưa Fragment hiện tại vào Back Stack (`addToBackStack()`):
+  - Cây giao diện UI của Fragment sẽ bị hủy hoàn toàn (`onDestroyView()`) để giải phóng bộ nhớ RAM chứa các View nặng (Bitmap, TextView, RecyclerView).
+  - Tuy nhiên, **instance của Fragment vẫn tiếp tục sống trong bộ nhớ** để lưu giữ toàn bộ biến trạng thái, dữ liệu logic và tham chiếu logic.
+- Khi người dùng nhấn nút Back để quay lại:
+  - Fragment không cần tạo lại instance (không gọi lại `onAttach()` hay `onCreate()`).
+  - Hệ thống chỉ gọi lại `onCreateView()` và `onViewCreated()` để tái tạo cây View mới từ trạng thái đã có.
 
 ---
 
-### 2.3 Configuration Change vs. Process Death
+### 2.3 Phân biệt Configuration Change và Process Death
+
+Khi người dùng đang sử dụng ứng dụng, giao diện có thể bị hủy và tạo lại bởi hai nguyên nhân hoàn toàn khác nhau:
 
 ```
                    +-------------------------------------------------------+
-                   |                 Sự kiện làm mất UI                   |
+                   |                 Sự kiện làm mất UI                    |
                    +-------------------------------------------------------+
                                    /                       \
                                   /                         \
       [Configuration Change (Xoay màn hình)]    [System Process Death (LMK kill app)]
                    |                                           |
-    - Process KHÔNG bị kill                     - Toàn bộ Process bị OS kill
-    - ViewModel còn sống trong RAM               - ViewModel bị hủy hoàn toàn
-    - View/Activity bị recreate                 - Phải phục hồi qua SavedStateHandle
+    - Tiến trình (Process) KHÔNG bị hủy         - Toàn bộ tiến trình bị OS kill
+    - ViewModel CÒN SỐNG trong RAM              - ViewModel & Singleton BỊ MẤT TRẮNG
+    - View/Activity bị recreate                 - Phục hồi qua SavedStateHandle / Storage
 ```
 
-1. **Configuration Change (Xoay màn hình, đổi ngôn ngữ, dark mode)**:
-   - OS hủy và tạo lại Activity để nạp tài nguyên (resources) mới tương ứng.
-   - `ViewModel` được lưu giữ trong `ViewModelStoreOwner` và **sống sót**.
-2. **System-Initiated Process Death (Low Memory Killer - LMK)**:
-   - Khi app ở background, OS có thể kill toàn bộ process của app để lấy RAM cho app khác.
-   - `ViewModel` và toàn bộ singleton trong RAM bị mất hoàn toàn.
-   - **Phục hồi:** saved state cho query/ID/UI state nhỏ; persistent storage/backend cho dữ liệu cần giữ lâu dài. Không có giới hạn an toàn phổ quát “50KB” áp cho mọi saved state; tránh payload lớn và xét Bundle/IPC constraints.
+1. **Configuration Change (Xoay màn hình, thay đổi ngôn ngữ, bật Dark Mode)**:
+   - Hệ điều hành chủ động hủy và tạo lại Activity để nạp lại bộ tài nguyên (resources: layout-land, values-night, string localized) phù hợp với cấu hình mới.
+   - Đối tượng `ViewModel` được gắn với `ViewModelStoreOwner` nên được giữ nguyên vẹn trong bộ nhớ RAM và không bị ảnh hưởng.
+2. **System-Initiated Process Death (Hệ thống thu hồi bộ nhớ qua Low Memory Killer - LMK)**:
+   - Khi ứng dụng chuyển xuống chạy nền (background), nếu hệ thống thiếu hụt RAM cho ứng dụng foreground khác, LMK sẽ lập tức chấm dứt tiến trình của ứng dụng.
+   - Toàn bộ bộ nhớ heap của tiến trình (bao gồm ViewModel, biến tĩnh, Singleton) đều bị xóa sạch.
+   - **Cơ chế khôi phục**:
+     - *Dữ liệu UI tạm thời nhỏ gọn* (ID đang xem, text đang gõ dở, filter query): Được lưu tự động hoặc thủ công qua `SavedStateHandle` / `onSaveInstanceState()`. Dữ liệu này được OS giữ lại dưới dạng `Bundle` qua Binder IPC.
+     - *Dữ liệu nghiệp vụ lớn*: Phải được lưu trữ bền vững (Persistent Storage) trong Room Database, DataStore hoặc lấy lại từ Server API. Tránh nhồi nhét object lớn vào Bundle vì kích thước buffer của Transaction IPC có giới hạn hữu hạn (chia sẻ chung cho toàn bộ tiến trình).
 
 ---
 
 ## 3. Bản chất FragmentManager & FragmentTransaction
 
-### 3.1 So sánh `add()`, `replace()`, `show()` / `hide()`, `attach()` / `detach()`
+### 3.1 So sánh `add()`, `replace()`, `show()` / `hide()`, `detach()` / `attach()`
 
-| Thao tác | Hành vi với View Hierarchy | Hành vi với Lifecycle của Fragment cũ | Khi nào sử dụng? |
+Mỗi thao tác trong `FragmentTransaction` tác động rất khác nhau lên View Hierarchy và Lifecycle:
+
+| Thao tác | Tác động lên View Hierarchy | Tác động lên Lifecycle của Fragment cũ | Tình huống sử dụng thực tế |
 | :--- | :--- | :--- | :--- |
-| **`add()`** | Chèn View mới đè lên container, giữ nguyên View cũ | Không ảnh hưởng Fragment cũ (vẫn `RESUMED`) | Hiển thị overlay, popup, hoặc ghép nhiều fragment vào các container khác nhau |
-| **`replace()`** | Xóa toàn bộ View cũ trong container và chèn View mới | Fragment cũ gọi `onDestroyView()` (nếu vào back stack) hoặc `onDestroy()` | Flat navigation (Master-Detail, Wizard flow, standard screen change) |
-| **`show()` / `hide()`** | Thay đổi `View.VISIBLE` / `View.GONE`, không tác động hierarchy | **KHÔNG** kích hoạt lifecycle! Gọi callback `onHiddenChanged(hidden: Boolean)` | **BottomNavigationView / Tabs** khi muốn giữ nguyên state và không muốn load lại data |
-| **`detach()` / `attach()`**| Hủy cây View khỏi UI hierarchy (`detach`) hoặc tạo lại (`attach`) | `detach` gọi `onDestroyView()`, `attach` gọi `onCreateView()` | ViewPager cũ hoặc khi muốn giải phóng View mà vẫn giữ instance |
+| **`add()`** | Chèn View mới đè lên container, giữ nguyên cây View cũ bên dưới | Không ảnh hưởng: Fragment cũ vẫn giữ nguyên trạng thái `RESUMED` | Hiển thị màn hình dạng layer đè lên nhau, popup overlay hoặc ghép nhiều Fragment vào các container khác nhau trên cùng màn hình |
+| **`replace()`** | Gỡ bỏ toàn bộ cây View cũ trong container và chèn cây View mới vào | Nếu có `addToBackStack()`: Fragment cũ gọi `onDestroyView()` nhưng giữ instance.<br/>Nếu không: Fragment cũ bị hủy hoàn toàn (`onDestroy()`, `onDetach()`) | Luồng điều hướng tuần tự cơ bản (Master-Detail, Form nhiều bước, chuyển màn hình chính) |
+| **`show()` / `hide()`** | Thay đổi thuộc tính hiển thị `View.VISIBLE` / `View.GONE`, giữ nguyên cây View trong container | **KHÔNG làm thay đổi lifecycle!** Chỉ kích hoạt callback `onHiddenChanged(hidden: Boolean)` | **BottomNavigationView / Tabs**: Giữ nguyên trạng thái cuộn, input và không muốn reload lại dữ liệu khi người dùng chuyển qua lại giữa các tab |
+| **`detach()` / `attach()`** | Tách cây View ra khỏi UI hierarchy (`detach`) hoặc gắn lại cây View vào (`attach`) | `detach` gọi `onDestroyView()`; `attach` kích hoạt lại từ `onCreateView()` | Triển khai trong các adapter kiểu cũ (như `FragmentPagerAdapter`) khi muốn giải phóng bộ nhớ UI nhưng giữ lại instance |
 
 ---
 
-### 3.2 Các biến thể của `commit()` trong FragmentTransaction
+### 3.2 Phân biệt 4 biến thể của `commit()` trong FragmentTransaction
 
 ```kotlin
 // 1. commit()
-fragmentManager.beginTransaction().replace(R.id.container, fragment).commit()
+supportFragmentManager.beginTransaction().replace(R.id.container, fragment).commit()
 
 // 2. commitNow()
-fragmentManager.beginTransaction().replace(R.id.container, fragment).commitNow()
+supportFragmentManager.beginTransaction().replace(R.id.container, fragment).commitNow()
 
 // 3. commitAllowingStateLoss()
-fragmentManager.beginTransaction().replace(R.id.container, fragment).commitAllowingStateLoss()
+supportFragmentManager.beginTransaction().replace(R.id.container, fragment).commitAllowingStateLoss()
 
 // 4. commitNowAllowingStateLoss()
-fragmentManager.beginTransaction().replace(R.id.container, fragment).commitNowAllowingStateLoss()
+supportFragmentManager.beginTransaction().replace(R.id.container, fragment).commitNowAllowingStateLoss()
 ```
 
-- **`commit()`**: Bất đồng bộ (Asynchronous). Gửi transaction vào main thread message queue. Lệnh sẽ chạy khi Main Thread rảnh rỗi.
-- **`commitNow()`**: Đồng bộ (Synchronous). Thực thi ngay lập tức tại dòng code đó.
-  - *Quy tắc thép:* **Không được gọi `addToBackStack()` cùng với `commitNow()`**, nếu không sẽ throw `IllegalStateException: This transaction is already being added to the back stack`.
-- **`commitAllowingStateLoss()`**: Tương tự `commit()`, nhưng cho phép thực thi kể cả sau khi Activity đã gọi `onSaveInstanceState()`. Nếu xảy ra kill process/xoay màn hình, transaction này có thể bị mất trạng thái.
-- **`commitNowAllowingStateLoss()`**: Đồng bộ và cho phép state loss.
+Bản chất của các hàm này được phân định dựa trên hai tiêu chí: **Thời điểm thực thi (Sync vs Async)** và **Mức độ an toàn với State Loss**:
+
+#### 1. Bất đồng bộ (`commit()`) vs Đồng bộ (`commitNow()`)
+- **`commit()`**: Hoạt động bất đồng bộ. Nó đưa công việc transaction vào hàng đợi tin nhắn (`MessageQueue`) của Main Thread. Transaction sẽ được thực thi khi Main Thread xử lý tới tin nhắn đó.
+- **`commitNow()`**: Hoạt động đồng bộ. Transaction được thực thi ngay lập tức tại dòng lệnh gọi hàm.
+  - ⚠️ **Quy tắc bắt buộc:** **Không được gọi `addToBackStack()` cùng với `commitNow()`**. Nếu vi phạm, hệ thống sẽ ném ra `IllegalStateException: This transaction is already being added to the back stack`. Lý do: `FragmentManager` có một Back Stack chung, nếu cho phép một transaction đồng bộ chen ngang vào giữa khi các transaction bất đồng bộ khác đang xếp hàng trong queue, thứ tự LIFO của Back Stack sẽ bị phá vỡ.
+
+#### 2. Vấn đề State Loss (`commitAllowingStateLoss()`)
+- Khi Activity sắp bị đưa vào trạng thái dừng, hệ thống sẽ gọi `onSaveInstanceState()` để chụp lại snapshot của UI và Fragment Back Stack vào một `Bundle`.
+- Nếu bạn gọi `commit()` **sau** khi `onSaveInstanceState()` đã chạy, transaction mới sẽ không kịp lưu vào Bundle. Nếu sau đó tiến trình bị kill, khi người dùng mở lại app, transaction này sẽ biến mất hoàn toàn. Để ngăn chặn lỗi sai lệch dữ liệu này, Android mặc định ném ra ngoại lệ:
+  `IllegalStateException: Can not perform this action after onSaveInstanceState`
+- Dùng `commitAllowingStateLoss()` là chấp nhận bỏ qua việc kiểm tra này: transaction vẫn được thực hiện nếu Activity chưa bị destroy, nhưng nếu app bị kill bởi hệ thống thì trạng thái này sẽ bị mất.
 
 ---
 
-### 3.3 `FragmentFactory` & Dependency Injection
+### 3.3 `FragmentFactory` và Dependency Injection hiện đại
 
-Trước đây, Android bắt buộc Fragment phải có constructor rỗng (no-argument constructor) để OS có thể instantiate lại Fragment qua Reflection (`Class.newInstance()`) khi recreate.
+Theo cơ chế truyền thống, Android Framework yêu cầu mọi Fragment phải có **constructor mặc định không tham số (no-argument constructor)**. Nguyên nhân là khi ứng dụng bị recreate (do xoay màn hình hoặc process death), hệ thống sử dụng Java Reflection (`Class.newInstance()`) để tự động khởi tạo lại Fragment.
 
-**Vấn đề:** Không thể inject dependency trực tiếp qua constructor (Constructor Injection).
+**Hạn chế:** Bạn không thể truyền dependency trực tiếp qua constructor (Constructor Injection), buộc phải dùng Field Injection hoặc Service Locator bên trong Fragment, khiến code khó viết Unit Test.
 
-**Giải pháp hiện đại:** Sử dụng `FragmentFactory`:
+**Giải pháp hiện đại với `FragmentFactory`:**
+
+Bằng cách cài đặt một `FragmentFactory` tùy biến trước khi `onCreate()` của Activity diễn ra, bạn có thể kiểm soát hoàn toàn việc khởi tạo Fragment:
 
 ```kotlin
 class CustomFragmentFactory(
     private val analyticsTracker: AnalyticsTracker,
-    private val repository: UserRepository
+    private val userRepository: UserRepository
 ) : FragmentFactory() {
     override fun instantiate(classLoader: ClassLoader, className: String): Fragment {
         return when (className) {
-            UserProfileFragment::class.java.name -> UserProfileFragment(analyticsTracker, repository)
+            UserProfileFragment::class.java.name -> 
+                UserProfileFragment(analyticsTracker, userRepository)
             else -> super.instantiate(classLoader, className)
         }
     }
 }
 
-// Thiết lập trong Activity TRƯỚC onCreate()
+// Cài đặt trong Activity TRƯỚC super.onCreate()
 class MainActivity : AppCompatActivity() {
+    @Inject lateinit var customFragmentFactory: CustomFragmentFactory
+
     override fun onCreate(savedInstanceState: Bundle?) {
         supportFragmentManager.fragmentFactory = customFragmentFactory
         super.onCreate(savedInstanceState)
@@ -189,187 +248,208 @@ class MainActivity : AppCompatActivity() {
 
 ---
 
-## 4. Giao tiếp giữa Activity và Fragment (Modern Communication Patterns)
+## 4. Giao tiếp giữa Activity và Fragment
 
-### 4.1 Fragment Result API (Khuyên dùng cho giao tiếp 1-1 giữa 2 Fragment)
-Không cần interface callback, không cần shared ViewModel, hoàn toàn lifecycle-safe.
+### 4.1 Fragment Result API (Mô hình 1-1 tối ưu giữa hai Fragment)
+
+Trước đây, để truyền dữ liệu giữa hai Fragment (ví dụ: màn hình chọn Filter trả kết quả về màn hình Danh sách), lập trình viên thường dùng Callback Interface hoặc `targetFragment` (đã bị deprecated).
+
+Cách tiếp cận chuẩn mực hiện nay là **Fragment Result API**: không phụ thuộc tham chiếu trực tiếp giữa các Fragment, không cần Interface tùy biến, và an toàn tuyệt đối với vòng đời.
 
 ```kotlin
-// 1. Màn hình gửi kết quả (ví dụ: FilterFragment)
-setFragmentResult("request_key", bundleOf("selected_filter" to "ACTIVE"))
+// 1. Màn hình gửi kết quả (FilterFragment)
+btnApply.setOnClickListener {
+    setFragmentResult(
+        "request_filter", 
+        bundleOf("selected_status" to "COMPLETED")
+    )
+    parentFragmentManager.popBackStack()
+}
 
-// 2. Màn hình nhận kết quả (ví dụ: ProductListFragment)
+// 2. Màn hình nhận kết quả (ProductListFragment)
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    setFragmentResultListener("request_key") { _, bundle ->
-        val filter = bundle.getString("selected_filter")
-        viewModel.applyFilter(filter)
+    
+    // Lắng nghe kết quả thông qua cùng một request key
+    setFragmentResultListener("request_filter") { requestKey, bundle ->
+        val status = bundle.getString("selected_status")
+        viewModel.filterByStatus(status)
     }
 }
 ```
 
-### 4.2 Activity-Scoped / NavGraph-Scoped ViewModel
-Dùng khi nhiều Fragment chia sẻ chung một luồng dữ liệu phức tạp (ví dụ: Checkout Flow, Wizard form).
+### 4.2 Shared ViewModel (Mô hình 1-Nhiều hoặc Chia sẻ State phức tạp)
+
+Khi nhiều Fragment cùng tham gia vào một quy trình nghiệp vụ chung (ví dụ: Checkout Flow gồm màn Giỏ hàng, Địa chỉ, Thanh toán), việc sử dụng chung một `ViewModel` có scope theo Activity hoặc theo Navigation Graph là giải pháp chuẩn mực.
 
 ```kotlin
-class StepOneFragment : Fragment() {
-    // Scope theo Activity host
-    private val sharedViewModel: CheckoutViewModel by activityViewModels()
+class CartFragment : Fragment(R.layout.fragment_cart) {
+    // ViewModel có phạm vi gắn liền với Activity chứa nó
+    private val checkoutViewModel: CheckoutViewModel by activityViewModels()
 }
 
-class StepTwoFragment : Fragment() {
-    // Cùng tham chiếu tới một instance ViewModel duy nhất
-    private val sharedViewModel: CheckoutViewModel by activityViewModels()
+class PaymentFragment : Fragment(R.layout.fragment_payment) {
+    // Cùng trỏ tới một instance CheckoutViewModel duy nhất trong RAM
+    private val checkoutViewModel: CheckoutViewModel by activityViewModels()
 }
 ```
 
 ---
 
-## 5. Phòng chống rò rỉ bộ nhớ (Memory Leak Pitfalls)
+## 5. Cạm bẫy rò rỉ bộ nhớ (Memory Leak Pitfalls)
 
 ### 5.1 Rò rỉ ViewBinding trong Fragment
 
-```kotlin
-class HomeFragment : Fragment(R.layout.fragment_home) {
-    // SAI LẦM: Giữ strong reference tới binding mà không null hóa
-    // private var binding: FragmentHomeBinding? = null
+Đây là lỗi rò rỉ bộ nhớ phổ biến nhất trong các dự án Android.
 
-    // ĐÚNG:
-    private var _binding: FragmentHomeBinding? = null
+**Nguyên nhân:** Như đã phân tích ở phần lifecycle, khi Fragment được đưa vào Back Stack, cây View bị hủy (`onDestroyView()`) nhưng đối tượng Fragment vẫn sống. Biến ViewBinding giữ tham chiếu mạnh (strong reference) tới Root View, và Root View lại giữ tham chiếu tới toàn bộ cây View con cùng với `Context` (Activity). Nếu không xóa tham chiếu này, toàn bộ cây View và Activity cũ sẽ không thể được Garbage Collector (GC) thu hồi.
+
+```kotlin
+class UserProfileFragment : Fragment(R.layout.fragment_user_profile) {
+
+    // 1. Khai báo backing property nullable để có thể giải phóng
+    private var _binding: FragmentUserProfileBinding? = null
+    
+    // 2. Property công khai chỉ hợp lệ giữa onCreateView và onDestroyView
     private val binding get() = _binding!!
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        _binding = FragmentHomeBinding.bind(view)
+        _binding = FragmentUserProfileBinding.bind(view)
+        
+        binding.txtName.text = "Phong"
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // BẮT BUỘC: Hủy reference khi View bị destroy để GC thu hồi View hierarchy
+        // 3. BẮT BUỘC: Xóa tham chiếu để GC có thể giải phóng toàn bộ cây View
         _binding = null
     }
 }
 ```
 
-### 5.2 Lắng nghe Coroutine Flow sai cách (`launchWhenStarted` vs `repeatOnLifecycle`)
+---
 
-- **`launchWhenStarted` / `launchWhenResumed` (ĐÃ BỊ DEPRECATE)**:
-  - Khi app xuống background (STOPPED), coroutine chỉ bị *suspend* chứ **không bị cancel**.
-  - Producer của Flow vẫn tiếp tục chạy ngầm, bắn dữ liệu vào buffer, gây lãng phí CPU, RAM và có thể crash khi resume.
-- **`repeatOnLifecycle` (CHUẨN HIỆN NAY)**:
-  - Khi lifecycle xuống dưới target state (ví dụ `STOPPED`), coroutine block sẽ **bị hủy hoàn toàn**.
-  - Khi màn hình quay lại `STARTED`, một coroutine mới sẽ được khởi chạy lại và bắt đầu collect từ đầu.
+### 5.2 Thu thập Flow sai cách: `launchWhenStarted` vs `repeatOnLifecycle`
+
+Lắng nghe dữ liệu phát ra từ Coroutine Flow trong UI Layer nếu không cẩn thận sẽ dẫn đến lãng phí CPU hoặc crash ứng dụng khi màn hình ở dưới background.
 
 ```kotlin
+// ❌ CÁCH CŨ (ĐÃ BỊ DEPRECATED): launchWhenStarted
+viewLifecycleOwner.lifecycleScope.launchWhenStarted {
+    viewModel.uiState.collect { state ->
+        renderUI(state) // Có thể lãng phí tài nguyên
+    }
+}
+```
+
+- **Vấn đề của `launchWhenStarted`**: Khi màn hình bị ẩn xuống background (trạng thái `STOPPED`), coroutine này chỉ bị **tạm dừng (suspend)** chứ **không bị hủy (cancel)**. Nếu Flow ở ViewModel là một Hot Flow (như `SharedFlow` hoặc `StateFlow`), nguồn phát vẫn tiếp tục gửi dữ liệu, làm tốn tài nguyên xử lý dưới nền mà người dùng không hề nhìn thấy.
+
+```kotlin
+// ✅ CHUẨN HIỆN NẠI: repeatOnLifecycle
 viewLifecycleOwner.lifecycleScope.launch {
     viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
         viewModel.uiState.collect { state ->
-            render(state)
+            renderUI(state)
         }
     }
 }
 ```
 
+- **Ưu điểm của `repeatOnLifecycle`**:
+  - Khi lifecycle của View rơi xuống dưới `STARTED` (khi app vào background hoặc Fragment vào back stack), coroutine block bên trong sẽ **bị hủy hoàn toàn (cancelled)**, ngừng mọi thao tác thu thập dữ liệu từ flow producer.
+  - Khi người dùng quay lại và màn hình đạt trạng thái `STARTED`, một coroutine mới sẽ được **tự động khởi tạo lại** và bắt đầu thu thập dữ liệu mới nhất.
+
 ---
 
 ## 6. Bộ câu hỏi phỏng vấn Senior (Q&A Chuyên sâu)
 
-### Q1: Phân biệt `Fragment.lifecycle` và `Fragment.viewLifecycleOwner.lifecycle`. Nếu observe LiveData/Flow bằng `this` (Fragment instance) trong `onViewCreated` thì hậu quả là gì?
+### Q1: Phân biệt `viewLifecycleOwner` và `this` (Fragment instance) khi đăng ký Observer. Nếu dùng nhầm `this` trong `onViewCreated` thì hậu quả là gì?
 **Trả lời:**
-- `Fragment.lifecycle` đại diện cho vòng đời của đối tượng Java/Kotlin Fragment (`onAttach` -> `onDestroy`).
-- `Fragment.viewLifecycleOwner.lifecycle` đại diện cho vòng đời của cây View UI (`onCreateView` -> `onDestroyView`).
+- `this` đại diện cho vòng đời của đối tượng Fragment (từ `onAttach` đến `onDetach`).
+- `viewLifecycleOwner` đại diện cho vòng đời của cây giao diện UI (từ `onCreateView` đến `onDestroyView`).
 - **Hậu quả khi dùng `this` trong `onViewCreated`:**
-  - Khi Fragment được đưa vào Back Stack, View bị hủy (`onDestroyView()`) nhưng Fragment instance vẫn còn sống.
-  - Khi user pop back stack, `onViewCreated()` được gọi lại và đăng ký một Observer **mới**.
-  - Kết quả là có **nhiều Observer cùng tồn tại** trên cùng một Fragment instance. Mỗi khi LiveData/Flow phát event, callback UI bị trigger nhiều lần, dẫn đến lỗi duplicated events, memory leak hoặc crash ứng dụng.
+  - Khi Fragment được đưa vào Back Stack, View bị hủy nhưng Fragment instance vẫn sống.
+  - Khi người dùng ấn Back quay lại, `onViewCreated()` được gọi thêm một lần nữa và tiếp tục đăng ký thêm một Observer mới vào cùng một LiveData/Flow.
+  - Hệ quả là có **nhiều Observer cùng lắng nghe đồng thời**. Mỗi khi dữ liệu thay đổi, callback UI bị kích hoạt lặp lại nhiều lần (gây duplicated toast, duplicated analytics event, hoặc crash app do truy cập view đã bị hủy).
 
 ---
 
-### Q2: Giải thích nguyên nhân gốc rễ của lỗi `IllegalStateException: Can not perform this action after onSaveInstanceState`. Cách khắc phục đúng chuẩn?
+### Q2: Giải thích nguyên nhân gốc rễ của ngoại lệ `IllegalStateException: Can not perform this action after onSaveInstanceState`. Cách xử lý đúng chuẩn là gì?
 **Trả lời:**
-- **Nguyên nhân:** Khi Activity có nguy cơ bị hủy bởi hệ điều hành, `onSaveInstanceState()` được gọi để chụp lại (snapshot) toàn bộ trạng thái UI và Fragment back stack vào một `Bundle`. Nếu bạn gọi `commit()` sau thời điểm này, transaction mới sẽ **không được lưu vào Bundle**. Khi app được restore lại, trạng thái UI sẽ bị sai lệch so với trước đó (State Loss). Do đó, Android Framework cố tình ném ra `IllegalStateException` để bảo vệ tính toàn vẹn của dữ liệu.
-- **Cách khắc phục:**
-  1. Đảm bảo các tác vụ transaction chỉ chạy khi Activity đang active (trước `onSaveInstanceState`, thường trước `onPause`/`onStop`).
-  2. Nếu transaction bắt nguồn từ callback async (như API response, Push Notification), hãy gắn nó với `lifecycleScope` / `repeatOnLifecycle` để tự động hủy khi UI không còn active.
-  3. Chỉ sử dụng `commitAllowingStateLoss()` khi việc mất transaction đó không gây ảnh hưởng nghiêm trọng tới UI state (ví dụ: đóng một popup thông báo không quan trọng).
+- **Nguyên nhân:** Khi Activity có nguy cơ bị hủy bởi hệ thống, callback `onSaveInstanceState()` được gọi để chụp lại trạng thái hiện tại lưu vào `Bundle`. Nếu bạn thực hiện một `FragmentTransaction.commit()` sau thời điểm này, transaction mới sẽ không được ghi nhận trong snapshot đó. Nếu tiến trình bị kill, khi người dùng mở lại ứng dụng, giao diện sẽ bị mất đồng bộ (State Loss). Do đó, Android cố tình ném ra ngoại lệ này để bảo vệ tính toàn vẹn của dữ liệu UI.
+- **Cách xử lý đúng chuẩn:**
+  1. Chỉ thực hiện transaction khi UI đang ở trạng thái active (trong các callback tương tác của người dùng hoặc gắn với `lifecycleScope`).
+  2. Nếu transaction đến từ kết quả của một tác vụ bất đồng bộ (API response, Coroutine), hãy thu thập dữ liệu bằng `repeatOnLifecycle` để tác vụ tự động dừng nếu UI đã xuống background.
+  3. Chỉ sử dụng `commitAllowingStateLoss()` cho các thao tác phụ trợ, không ảnh hưởng nghiêm trọng đến luồng trải nghiệm chính của người dùng (ví dụ: đóng một Dialog loading hoặc ẩn một banner quảng cáo).
 
 ---
 
-### Q3: Tại sao `commitNow()` không thể kết hợp với `addToBackStack()`?
+### Q3: Tại sao `commitNow()` không được phép sử dụng cùng với `addToBackStack()`?
 **Trả lời:**
-- `FragmentManager` duy trì một danh sách Back Stack chung cho toàn bộ transaction.
-- Khi các transaction trước đó được submit qua `commit()`, chúng nằm trong Message Queue và đang chờ thực thi bất đồng bộ.
-- Nếu `commitNow()` cho phép thêm vào Back Stack ngay lập tức tại thời điểm gọi, nó sẽ làm **đảo lộn thứ tự tuyến tính** của Back Stack (transaction gọi sau lại chen ngang vào trước các transaction đang xếp hàng trong queue).
-- Để đảm bảo tính toàn vẹn thứ tự của ngăn xếp LIFO, Android cấm tuyệt đối việc gọi `addToBackStack()` kèm với `commitNow()`. Nếu cần thực thi đồng bộ và có backstack, phải dùng `commit()` kết hợp với `executePendingTransactions()`.
+- `FragmentManager` duy trì một ngăn xếp Back Stack chung theo cơ chế LIFO (Last In, First Out) cho toàn bộ các transaction.
+- Khi người dùng gọi các hàm `commit()` thông thường, các transaction đó được đẩy vào hàng đợi MessageQueue của Main Thread để thực thi tuần tự.
+- Nếu `commitNow()` cho phép đẩy một transaction vào Back Stack ngay lập tức tại thời điểm gọi, nó sẽ **chen ngang và làm đảo lộn thứ tự** của các transaction đang chờ trong queue.
+- Để đảm bảo tính nhất quán và trật tự của ngăn xếp điều hướng, framework cấm việc kết hợp hai thao tác này. Nếu muốn commit có Back Stack và thực thi ngay lập tức, cần dùng `commit()` kết hợp với `supportFragmentManager.executePendingTransactions()`.
 
 ---
 
-### Q4: Trong một ứng dụng có BottomNavigationView 5 tab, mỗi tab là một màn hình phức tạp (list data, scroll position, camera). Bạn sẽ quản lý các Fragment này như thế nào để tối ưu trải nghiệm và hiệu năng?
+### Q4: Trong ứng dụng có BottomNavigationView gồm 5 tab, mỗi tab có giao diện phức tạp, bạn sẽ quản lý các Fragment này như thế nào để tối ưu hiệu năng và trải nghiệm?
 **Trả lời:**
-Các chiến lược triển khai:
-1. **Chiến lược `show()` / `hide()` (Giữ state trong RAM)**:
-   - *Cách làm:* Khởi tạo cả 5 Fragment (hoặc lazy-load khi tab được click lần đầu) qua `add()`, sau đó dùng `show(currentFragment)` và `hide(otherFragments)`.
-   - *Ưu điểm:* Giữ View hierarchy giúp tránh tạo lại khi chuyển tab, thường giữ scroll/input trong View; vẫn phải đo latency và xử lý phục hồi sau mất process.
-   - *Nhược điểm:* Tốn RAM do giữ cả 5 cây View hierarchy trong bộ nhớ. Phải override `onHiddenChanged()` để pause video/camera/animations khi tab bị ẩn.
-2. **Chiến lược Multiple Back Stacks (Jetpack Navigation Component - Khuyên dùng)**:
-   - Hỗ trợ từ Navigation 2.4.0+ thông qua cơ chế `saveState` và `restoreState`.
-   - Khi chuyển tab, Fragment cũ bị hủy View để giải phóng bộ nhớ, nhưng toàn bộ Back Stack và UI state của tab đó được serialize và lưu lại.
-   - Khi quay lại tab cũ, state được restore theo cơ chế saved state/navigation; dữ liệu ngoài cơ chế đó và tài nguyên chạy ngầm vẫn cần ownership/cleanup đúng.
+Có hai chiến lược chính tùy thuộc vào yêu cầu của ứng dụng:
+
+1. **Chiến lược `show()` / `hide()` (Giữ trạng thái trong bộ nhớ RAM):**
+   - *Cách làm:* Khởi tạo các Fragment và add vào container cùng lúc (hoặc lazy-add khi bấm tab lần đầu), sau đó dùng `show()` tab được chọn và `hide()` các tab còn lại.
+   - *Ưu điểm:* Chuyển đổi tab tức thì, giữ nguyên vị trí cuộn trang (scroll position) và dữ liệu nhập dở của người dùng.
+   - *Nhược điểm:* Tốn RAM vì cây View của cả 5 tab đều tồn tại liên tục trong bộ nhớ. Cần override `onHiddenChanged()` để tạm dừng các tác vụ nặng (như phát video, camera preview, animation) khi tab bị ẩn.
+2. **Chiến lược Multiple Back Stacks (Khuyên dùng với Jetpack Navigation Component):**
+   - *Cách làm:* Sử dụng Navigation Component (từ bản 2.4.0 trở lên) có hỗ trợ sẵn tính năng Multiple Back Stacks (`saveState` và `restoreState`).
+   - *Ưu điểm:* Khi rời khỏi một tab, View của tab đó bị hủy để giải phóng bộ nhớ, nhưng toàn bộ lịch sử Back Stack và trạng thái UI của tab được lưu trữ an toàn. Khi quay lại tab, giao diện được khôi phục chính xác trạng thái trước đó mà vẫn tiết kiệm tài nguyên hệ thống.
 
 ---
 
-### Q5: Khi nào xảy ra hiện tượng Fragment Overlapping (các Fragment bị vẽ đè lên nhau khi xoay màn hình)? Cách khắc phục triệt để?
+### Q5: Hiện tượng Fragment Overlapping (các Fragment bị vẽ đè lên nhau khi xoay màn hình) xuất phát từ đâu? Khắc phục triệt để như thế nào?
 **Trả lời:**
-- **Nguyên nhân:** Khi Activity bị recreate (do xoay màn hình hoặc process death), `FragmentManager` tự động khôi phục và thêm lại các Fragment đã tồn tại từ `savedInstanceState`. Nếu trong `onCreate()` của Activity, lập trình viên vẫn viết code `supportFragmentManager.beginTransaction().add(...)` mà không kiểm tra trạng thái, một instance Fragment mới sẽ được tạo thêm và add đè lên Fragment cũ đã được khôi phục.
-- **Cách khắc phục:** Luôn kiểm tra `savedInstanceState == null` trước khi khởi tạo Fragment ban đầu:
+- **Nguyên nhân:** Khi Activity bị tạo lại do xoay màn hình hoặc khôi phục sau Process Death, `FragmentManager` sẽ **tự động phục hồi và gắn lại** các Fragment đã tồn tại từ `savedInstanceState`. Nếu trong `onCreate()` của Activity, lập trình viên vẫn chủ động gọi lệnh thêm Fragment mới:
+  ```kotlin
+  supportFragmentManager.beginTransaction()
+      .add(R.id.container, MyFragment())
+      .commit()
+  ```
+  mà không kiểm tra điều kiện, hệ thống sẽ tạo thêm một instance mới của `MyFragment` và vẽ đè lên instance cũ đã được phục hồi, tạo ra hiện tượng chồng chéo giao diện.
+- **Cách khắc phục:** Luôn bọc đoạn code khởi tạo Fragment ban đầu bên trong điều kiện kiểm tra `savedInstanceState == null`:
+  ```kotlin
+  override fun onCreate(savedInstanceState: Bundle?) {
+      super.onCreate(savedInstanceState)
+      setContentView(R.layout.activity_main)
 
-```kotlin
-override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    setContentView(R.layout.activity_main)
-
-    if (savedInstanceState == null) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_container, HomeFragment())
-            .commit()
-    }
-}
-```
+      if (savedInstanceState == null) {
+          supportFragmentManager.beginTransaction()
+              .replace(R.id.container, HomeFragment())
+              .commit()
+      }
+  }
+  ```
 
 ---
 
-### Q6: Tại sao `setRetainInstance(true)` bị deprecated trong Android Jetpack?
+### Q6: Tại sao phương thức `setRetainInstance(true)` lại bị deprecated trong Android Jetpack?
 **Trả lời:**
-- `setRetainInstance(true)` từng được dùng để giữ lại instance của Fragment khi xoay màn hình (bỏ qua `onDestroy` và `onCreate`).
-- **Lý do bị Deprecated:**
-  1. *Phá vỡ tính đồng nhất của kiến trúc:* Fragment được thiết kế là UI Controller, nhưng `retainInstance` biến nó thành nơi chứa dữ liệu/state logic.
-  2. *Không giải quyết được Process Death:* `retainInstance` chỉ sống sót qua Configuration Change, hoàn toàn vô dụng khi OS kill process.
-  3. *Nguy cơ Memory Leak cực cao:* Nếu Fragment giữ reference tới Context, Activity cũ, hoặc View callbacks, việc retain instance sẽ kéo theo toàn bộ Activity cũ bị rò rỉ trong bộ nhớ.
-- **Thay thế:** Sử dụng `ViewModel` để lưu trữ data sống qua config change và `SavedStateHandle` để chống Process Death.
+`setRetainInstance(true)` từng được dùng để giữ lại instance của Fragment khi Activity bị hủy do xoay màn hình (bỏ qua `onDestroy` và `onCreate` của Fragment). Phương thức này bị khai tử vì các lý do:
+1. **Phá vỡ nguyên tắc kiến trúc:** Fragment là một UI Controller, việc biến nó thành một nơi lưu trữ dữ liệu sống sót qua vòng đời của Activity làm mập mờ ranh giới trách nhiệm giữa UI và Business Logic.
+2. **Không giải quyết được Process Death:** `retainInstance` chỉ duy trì được đối tượng qua Configuration Change, hoàn toàn vô tác dụng khi hệ thống kill tiến trình do thiếu RAM.
+3. **Nguy cơ rò rỉ bộ nhớ rất cao:** Nếu Fragment giữ bất kỳ tham chiếu nào tới Context cũ, View callbacks hoặc Activity cũ, việc giữ lại instance sẽ kéo theo toàn bộ cây tài nguyên cũ bị rò rỉ trong heap.
+- **Giải pháp thay thế:** Sử dụng kiến trúc hiện đại với **`ViewModel`** (để giữ dữ liệu qua xoay màn hình) kết hợp với **`SavedStateHandle`** (để chống chịu Process Death).
 
 ---
 
-### Q7: Giả sử Activity A khởi chạy Activity B (Launch Mode `standard`). Trình bày thứ tự chính xác của tất cả các hàm lifecycle. Tại sao A không gọi `onStop()` ngay khi B bắt đầu khởi tạo?
+### Q7: Tại sao phương thức `onBackPressed()` bị deprecated từ Android 13 (API 33)? Cơ chế mới hoạt động ra sao?
 **Trả lời:**
-- **Thứ tự thực thi:**
-  1. `A.onPause()`
-  2. `B.onCreate()`
-  3. `B.onStart()`
-  4. `B.onResume()`
-  5. `A.onStop()`
-- **Lý do A không gọi `onStop()` ngay:**
-  - Android ưu tiên **trải nghiệm thị giác liền mạch**. Nếu A gọi `onStop()` và hủy UI quá sớm trong khi B vẫn đang inflate layout XML hoặc khởi tạo View, màn hình sẽ bị hiện tượng màn hình đen (black screen/blank screen) hoặc giật khung hình (frame drop).
-  - Dùng điều kiện visibility để giải thích onStop; không suy ra timestamp frame đầu tiên hoặc hành vi mọi multi-window/translucent transition từ thứ tự callback thông thường.
-
----
-
-### Q8: Cơ chế hoạt động của `OnBackPressedDispatcher` trong Activity hiện đại là gì? Tại sao `onBackPressed()` bị deprecated trong API 33?
-**Trả lời:**
-- **Lý do `onBackPressed()` bị deprecated:**
-  - `onBackPressed()` là cơ chế chặn phím cứng/gesture trực tiếp nhưng không hỗ trợ **Predictive Back Animation** (tính năng từ Android 13/14 cho phép người dùng vuốt nhẹ mép màn hình để xem trước màn hình phía sau trước khi quyết định thả tay để back).
-- **Cơ chế `OnBackPressedDispatcher`:**
-  - Tách rời logic xử lý Back Navigation ra thành các callback độc lập có thể đăng ký ở bất kỳ đâu (Activity, Fragment, Custom View, Compose).
-  - Tích hợp chặt chẽ với `LifecycleOwner`: Khi Fragment bị `STOPPED` hoặc `DESTROYED`, callback tự động bị disable hoặc gỡ bỏ, giúp quản lý callback theo lifecycle; các reference/job khác vẫn cần cleanup đúng.
+- **Lý do deprecated:** `onBackPressed()` chặn sự kiện phím cứng Back một cách trực tiếp và đột ngột. Cơ chế này không thể hỗ trợ tính năng **Predictive Back Animation** (tính năng từ Android 13/14+ cho phép người dùng vuốt nhẹ từ cạnh màn hình để xem trước giao diện màn hình phía sau hoặc màn hình Home trước khi quyết định thả tay để back thật).
+- **Cơ chế mới với `OnBackPressedDispatcher`:**
+  - Tách logic xử lý thao tác Back thành các đối tượng `OnBackPressedCallback` độc lập.
+  - Các callback này được gắn kèm với `LifecycleOwner` (Activity hoặc Fragment). Khi màn hình rơi vào trạng thái `STOPPED` hoặc `DESTROYED`, callback sẽ tự động tạm vô hiệu hóa hoặc bị gỡ bỏ, ngăn ngừa memory leak.
+  - Hệ thống biết trước màn hình nào đang sẵn sàng xử lý thao tác Back để hiển thị animation vuốt mượt mà tương ứng.
 
 ```kotlin
 requireActivity().onBackPressedDispatcher.addCallback(
@@ -377,9 +457,9 @@ requireActivity().onBackPressedDispatcher.addCallback(
     object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
             if (hasUnsavedChanges()) {
-                showConfirmExitDialog()
+                showConfirmDiscardDialog()
             } else {
-                isEnabled = false // Tắt callback này để hệ điều hành back tự nhiên
+                isEnabled = false // Vô hiệu hóa callback này để hệ thống back tự nhiên
                 requireActivity().onBackPressedDispatcher.onBackPressed()
             }
         }
@@ -389,33 +469,64 @@ requireActivity().onBackPressedDispatcher.addCallback(
 
 ---
 
-### Q9: Làm thế nào để giả lập và kiểm thử chuẩn xác kịch bản System-Initiated Process Death khi phát triển ứng dụng?
+### Q8: Làm thế nào để giả lập và kiểm thử chính xác kịch bản Process Death trong quá trình phát triển?
 **Trả lời:**
-Nhiều lập trình viên nhầm lẫn giữa việc nhấn nút "Stop" trong Android Studio (tương đương Force Stop, xóa sạch saved state) với Process Death thật.
+Nhiều lập trình viên nhầm lẫn việc nhấn nút **"Stop"** hoặc chạy lại app từ Android Studio với kịch bản Process Death. Nhấn Stop sẽ tương đương với `Force Stop` — toàn bộ saved state bị xóa sạch, không phải hành vi thực tế của hệ điều hành.
 
-**Các bước giả lập chuẩn:**
-1. Mở app, điều hướng tới màn hình cần kiểm tra, nhập liệu dữ liệu vào Form.
-2. Nhấn nút **Home** để đưa app về background (lúc này OS sẽ gọi `onSaveInstanceState`).
-3. Sử dụng command line (ADB) để kill process của app:
+**Quy trình giả lập chuẩn:**
+1. Mở ứng dụng, thao tác nhập dữ liệu vào form hoặc điều hướng vào sâu trong các màn hình.
+2. Nhấn nút **Home** trên thiết bị để đưa ứng dụng xuống background (lúc này OS sẽ kích hoạt `onSaveInstanceState`).
+3. Sử dụng lệnh ADB trong terminal để giả lập việc hệ thống thu hồi tài nguyên và kill process:
    ```bash
-   adb shell am kill <package_name>
+   adb shell am kill <your.package.name>
    ```
-   *(Lưu ý: `am kill` chỉ kill process khi app đang ở background, hữu ích để thử mất process khi background, nhưng không mô phỏng mọi chi tiết của hệ thống/OEM).*
-4. Nhấn vào app trong màn hình Recent Apps để mở lại.
-5. **Kiểm tra:** Nếu app bị crash (do `NullPointerException` từ ViewModel rỗng hoặc Intent arguments thiếu) -> Xử lý chưa đạt chuẩn Process Death. Nếu app phục hồi đúng theo yêu cầu, kịch bản đó đã đạt; tiếp tục kiểm tra missing/stale data, network error và các state khác, không suy ra mọi restoration path đều an toàn.
+   *(Lệnh `am kill` chỉ chấm dứt tiến trình khi ứng dụng đang nằm dưới nền, mô phỏng chuẩn xác cơ chế Low Memory Killer).*
+4. Nhấn vào ứng dụng trong danh sách **Recent Apps** để mở lại.
+5. **Đánh giá:**
+   - Nếu ứng dụng bị crash do `NullPointerException` (thường do ỷ lại vào các biến static, ViewModel hoặc dữ liệu singleton trong RAM) $\rightarrow$ Xử lý phục hồi trạng thái thất bại.
+   - Nếu ứng dụng hiển thị lại đúng màn hình trước đó với đầy đủ dữ liệu form đã nhập $\rightarrow$ Đạt chuẩn xử lý Process Death.
 
 ---
 
-### Q10: Phân tích kiến trúc Single-Activity trong dự án Multi-Module quy mô lớn. Làm thế nào giải quyết bài toán Navigation giữa các feature module mà không gây phụ thuộc vòng (Circular Dependency)?
+### Q9: Trong dự án Multi-Module quy mô lớn áp dụng Single-Activity, làm thế nào để Fragment thuộc Module A điều hướng sang Fragment thuộc Module B mà không gây phụ thuộc vòng (Circular Dependency)?
 **Trả lời:**
-Trong mô hình Multi-module (`:app`, `:feature:login`, `:feature:dashboard`, `:core:navigation`):
-1. **Vấn đề:** Module `:feature:login` cần mở màn hình trong `:feature:dashboard`, nhưng hai feature module độc lập không được phép `implementation` lẫn nhau (vi phạm nguyên tắc đóng gói và gây circular dependency).
-2. **Giải pháp kiến trúc:**
-   - **Deep Link Navigation (Khuyên dùng với Jetpack Navigation):** Các màn hình expose URL pattern (ví dụ: `myapp://dashboard/profile`). Feature login mở màn hình dashboard thông qua `navController.navigate("myapp://dashboard/profile".toUri())`.
-   - **Navigation Interface Pattern (Mediator / Router Pattern):**
-     - Đặt interface điều hướng trong `:core:navigation` (ví dụ: `interface DashboardNavigator { fun openDashboard(context: Context) }`).
-     - Module `:app` (module tổng phụ thuộc tất cả feature) sẽ implement interface này và inject vào Feature Login thông qua Dagger/Hilt.
-     - Feature Login chỉ gọi `dashboardNavigator.openDashboard(context)` mà không cần biết chi tiết class Activity hay Fragment của Dashboard.
+Trong kiến trúc Multi-Module chuẩn (ví dụ: `:feature:auth`, `:feature:dashboard`, `:core:navigation`), hai feature module độc lập tuyệt đối không được phụ thuộc trực tiếp vào nhau.
 
+Có hai giải pháp kiến trúc phổ biến:
 
-Đọc sâu: [State recovery và ma trận kiểm chứng](./state-recovery.md), [Context/ownership](./context-memory.md).
+1. **Deep Link Navigation (Khuyên dùng với Jetpack Navigation Component):**
+   - Mỗi màn hình Fragment đăng ký một URL pattern duy nhất trong nav graph (ví dụ: `app://dashboard/home`).
+   - Feature Auth muốn chuyển sang Dashboard chỉ cần gọi:
+     ```kotlin
+     findNavController().navigate("app://dashboard/home".toUri())
+     ```
+   - Các module hoàn toàn độc lập và không cần biết đến class cụ thể của nhau.
+
+2. **Mediator / Router Pattern (Sử dụng Interface điều hướng):**
+   - Định nghĩa một Interface điều hướng trừu tượng bên trong `:core:navigation`:
+     ```kotlin
+     interface DashboardNavigator {
+         fun openDashboard(fragment: Fragment)
+     }
+     ```
+   - Module tổng `:app` (nơi phụ thuộc tất cả các feature module) sẽ triển khai (implement) interface này và cung cấp thông qua Dependency Injection (Hilt/Dagger).
+   - Module `:feature:auth` chỉ việc inject `DashboardNavigator` và gọi hàm mà không có bất kỳ phụ thuộc trực tiếp nào tới `:feature:dashboard`.
+
+---
+
+### Q10: Phân tích sự đánh đổi (trade-offs) giữa việc dùng Fragment và chuyển hẳn sang Jetpack Compose 100% trong xây dựng UI?
+**Trả lời:**
+- **Khi sử dụng Fragment:**
+  - *Ưu điểm:* Hệ sinh thái thư viện XML/View cực kỳ hoàn thiện và trưởng thành; quản lý tốt các thành phần phần cứng legacy (MapView, CameraX, SurfaceView chuyên dụng); đội ngũ lập trình viên đã quá quen thuộc với lifecycle.
+  - *Nhược điểm:* Quản lý View phức tạp, boilerplate code lớn (phải tách biệt View Lifecycle và Fragment Instance Lifecycle); dễ phát sinh memory leak từ ViewBinding; hiệu năng inflate XML tốn kém hơn cơ chế tái cấu trúc trực tiếp bằng code Kotlin.
+- **Khi chuyển sang Jetpack Compose 100%:**
+  - *Ưu điểm:* Loại bỏ hoàn toàn sự rắc rối của Fragment Lifecycle; loại bỏ lớp ViewBinding và nguy cơ rò rỉ bộ nhớ View; Single Source of Truth cho UI State; UI được viết hoàn toàn bằng Kotlin mang tính khai báo (Declarative UI); code tái sử dụng cao và dễ test giao diện độc lập.
+  - *Đánh đổi:* Cần đầu tư thời gian tối ưu Recomposition (tránh recompose không cần thiết qua `@Stable`, `remember`, `derivedStateOf`); chi phí học tập cao cho đội ngũ; một số thư viện bên thứ ba chưa có bản hỗ trợ Compose native vẫn phải bọc qua `AndroidView`.
+
+---
+
+## Đọc sâu và thực hành
+
+- [State recovery và ma trận kiểm chứng](./state-recovery.md)
+- [Context, ownership và memory leak](./context-memory.md)
+- [Flow theo lifecycle và quản lý coroutine](../foundation/kotlin/flow-lifecycle.md)
