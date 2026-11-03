@@ -1,0 +1,248 @@
+.root {
+  max-width: 1180px;
+  padding: 2.5rem 1.25rem 4rem;
+}
+.root :is(input, textarea, select, button) {
+  font: inherit;
+}
+.root :is(input:not([type='checkbox']), textarea, select) {
+  width: 100%;
+  border: 1px solid var(--ak-card-border);
+  border-radius: 7px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  padding: 0.65rem;
+}
+.root :is(input[type='checkbox']) {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+}
+.root :is(button, select) {
+  min-height: 44px;
+}
+.root :is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--ifm-color-primary);
+  outline-offset: 3px;
+}
+.root label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 500;
+}
+.root textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.root h2 {
+  font-size: 1.35rem;
+  margin: 0 0 1rem;
+}
+.root h3 {
+  font-size: 1.1rem;
+}
+.heading h1 {
+  margin: 0.5rem 0 1.5rem;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  letter-spacing: -0.03em;
+}
+.eyebrow {
+  color: var(--ak-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--ak-card-border);
+  padding-bottom: 1rem;
+  margin-bottom: 2rem;
+}
+.nav a {
+  padding: 0.5rem 0.8rem;
+  color: var(--ak-text-muted);
+  border-radius: 6px;
+  font-weight: 600;
+}
+.nav a.active {
+  color: var(--ifm-color-primary);
+  background: var(--ifm-color-primary-contrast-background);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: 1.25rem 0;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.card {
+  background: var(--ak-card-bg);
+  border: 1px solid var(--ak-card-border);
+  border-radius: 12px;
+  padding: 1.4rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card + .card {
+  margin-top: 1rem;
+}
+.grid > .card,
+.stats > .card,
+.months > .card {
+  margin-top: 0;
+}
+.card p:last-child {
+  margin-bottom: 0;
+}
+.number {
+  font-size: 2rem;
+  font-weight: 750;
+  display: block;
+  color: var(--ifm-color-primary);
+}
+.muted {
+  color: var(--ak-text-muted);
+  font-size: 0.9rem;
+}
+.status {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--ak-card-border);
+  border-radius: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.status[data-state='passed'],
+.status[data-state='mastered'] {
+  color: var(--ifm-color-primary);
+}
+.status[data-state='needs-review'] {
+  color: var(--ifm-color-warning-darkest);
+  background: var(--ifm-color-warning-contrast-background);
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.root .check {
+  flex-direction: row;
+  align-items: flex-start;
+  font-weight: 400;
+}
+.root progress {
+  width: 100%;
+  accent-color: var(--ifm-color-primary);
+  height: 0.7rem;
+}
+.list {
+  padding-left: 1.3rem;
+}
+.list li {
+  margin: 0.6rem 0;
+}
+.months {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 2rem;
+}
+.lesson {
+  margin: 0.75rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--ak-card-border);
+}
+.lesson a {
+  display: block;
+  font-weight: 650;
+  margin-bottom: 0.5rem;
+}
+.detail {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.detail section {
+  margin: 2rem 0;
+}
+.detail pre {
+  white-space: pre;
+}
+.tableWrap {
+  overflow-x: auto;
+}
+.root table {
+  display: table;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.root th {
+  text-align: left;
+}
+.notice {
+  border-left: 3px solid var(--ifm-color-primary);
+  background: var(--ifm-color-primary-contrast-background);
+  padding: 1rem;
+  border-radius: 5px;
+  margin: 1rem 0;
+}
+.root summary {
+  cursor: pointer;
+  font-weight: 650;
+  padding: 0.75rem 0;
+}
+.root fieldset {
+  border: 1px solid var(--ak-card-border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.root legend {
+  font-size: 1rem;
+  padding: 0 0.5rem;
+  width: auto;
+  margin: 0;
+}
+@media (max-width: 800px) {
+  .months {
+    grid-template-columns: 1fr;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 500px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+  .root {
+    padding: 1.5rem 1rem 3rem;
+  }
+  .card {
+    padding: 1rem;
+  }
+  .nav {
+    gap: 0.25rem;
+  }
+  .nav a {
+    padding: 0.5rem;
+  }
+}
