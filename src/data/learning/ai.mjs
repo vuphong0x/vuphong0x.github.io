@@ -1,0 +1,295 @@
+import {lesson} from './schema.mjs';
+const ai = {
+  label: 'Android AI: chọn giải pháp và giới hạn thiết bị',
+  url: 'https://developer.android.com/ai',
+};
+export default [
+  lesson({
+    id: 'llm-contracts',
+    title: 'LLM integration và structured outputs',
+    category: 'AI Engineering',
+    phase: 3,
+    month: 7,
+    prerequisites: ['storage-network'],
+    relatedDocs: ['/data/retrofit', '/security/security-model'],
+    quizTopics: [],
+    resources: [
+      ai,
+      {label: 'Structured outputs', url: 'https://ai.google.dev/gemini-api/docs/structured-output'},
+    ],
+    objectives: [
+      'Validate output theo schema và domain invariant trước khi render.',
+      'Test timeout, refusal và output không hợp lệ bằng fake.',
+    ],
+    theory: [
+      'Structured output ràng buộc hình dạng response theo khả năng provider; không chứng minh nội dung đúng. Parser phải kiểm tra type/range và business invariant. Tách raw provider DTO khỏi model UI để version schema độc lập.',
+      'LLM request có latency, quota và chi phí. Dùng gateway backend khi cần giữ credential server; APK không bảo vệ secret. Timeout/cancel và bounded retry cần xác định UX, tránh tính tiền lặp lại không giới hạn.',
+    ],
+    code: 'data class Feedback(val summary: String, val confidence: Double)\nfun validate(f: Feedback): Feedback {\n  require(f.summary.isNotBlank() && f.summary.length <= 1000)\n  require(f.confidence.isFinite() && f.confidence in 0.0..1.0)\n  return f\n}',
+    behavior:
+      'Validator Kotlin độc lập chạy sau JSON decoding. confidence chỉ là field của contract, không phải xác suất đã hiệu chuẩn.',
+    practice: 'Feedback có schema cho video',
+    context: 'Dùng fixture JSON và fake gateway; không cần API trả phí.',
+    steps: [
+      'Định nghĩa DTO, schema version và domain validator.',
+      'Viết gateway interface với fake success/refusal/timeout.',
+      'Render kết quả hợp lệ và fallback riêng cho invalid output.',
+    ],
+    constraints: 'Không credential trong client; giới hạn payload, không tự gửi video.',
+    expected: 'Không render lời khuyên không qua validator; lỗi có thể phục hồi.',
+    verification: 'Test malformed JSON, missing field, NaN/range, refusal và timeout.',
+    challenge: 'Provider thêm schema v2 mà app cũ vẫn hoạt động.',
+    challengeExpected: 'Có compatibility policy và fixture theo version.',
+    criteria: [
+      'Schema và domain validation có test.',
+      'Fallback/refusal/timeout riêng biệt.',
+      'Privacy và chi phí được ghi trong ADR.',
+    ],
+    followUp: 'Inject một output đúng schema nhưng sai dữ kiện và bổ sung kiểm tra.',
+    reviewQuestions: [
+      'JSON hợp lệ có nghĩa nội dung đúng?',
+      'Vì sao không retry vô hạn khi timeout?',
+    ],
+  }),
+  lesson({
+    id: 'tool-calling',
+    title: 'Tool calling và trust boundaries',
+    category: 'AI Engineering',
+    phase: 3,
+    month: 7,
+    prerequisites: ['llm-contracts'],
+    relatedDocs: [
+      '/security/security-model',
+      '/security/permissions-components',
+      '/data/offline-first',
+    ],
+    quizTopics: [],
+    resources: [
+      {label: 'Function calling', url: 'https://ai.google.dev/gemini-api/docs/function-calling'},
+    ],
+    objectives: [
+      'Dispatch tool chỉ từ allowlist và validate mọi argument.',
+      'Chứng minh duplicate tool call không thực thi mutation hai lần.',
+    ],
+    theory: [
+      'Model đề xuất tên hàm và arguments; application mới là nơi thực thi. Nội dung prompt, tài liệu và output model là input không đáng tin. Authorization lấy từ session server, không từ field userId model gửi.',
+      'Read-only tool và mutation có rủi ro khác nhau. Mutation cần policy xác nhận theo sản phẩm, idempotency key, audit và giới hạn số bước. Một vòng agent không có budget có thể lặp và tiêu thụ tài nguyên.',
+    ],
+    code: 'fun validateTool(name: String, videoId: String, allowed: Set<String>) {\n  require(name == "read_analysis")\n  require(videoId in allowed)\n}\n// allowed phải đến từ authorization của app, không từ model.',
+    behavior:
+      'Guard minh họa không chạy tool; production phải kiểm tra quyền và thực thi trong cùng trust boundary.',
+    practice: 'Tool đọc kết quả phân tích đã lưu',
+    context: 'Fake model phát tool proposal; repository có dữ liệu hai account.',
+    steps: [
+      'Tạo typed registry chỉ có read_analysis.',
+      'Validate tên, args, ownership, timeout và step budget.',
+      'Inject unknown tool, cross-account ID và duplicate mutation vào test.',
+    ],
+    constraints:
+      'Không reflection dispatch, shell execution hoặc authorization do model quyết định.',
+    expected: 'Call sai bị từ chối, read hợp lệ có audit không chứa dữ liệu nhạy cảm.',
+    verification: 'Test allowlist, quyền, malformed args và retry/idempotency.',
+    challenge: 'Thêm tool xóa video với explicit confirmation.',
+    challengeExpected:
+      'Confirmation gắn đúng operation và payload; duplicate không xóa thêm dữ liệu.',
+    criteria: [
+      'Trust boundary được vẽ.',
+      'Có adversarial tests.',
+      'Mutation có authorization/idempotency và audit.',
+    ],
+    followUp: 'Đưa prompt injection vào metadata video và kiểm tra policy còn đúng.',
+    reviewQuestions: [
+      'Function schema có cung cấp authorization?',
+      'Khi nào cần confirmation lại?',
+    ],
+  }),
+  lesson({
+    id: 'on-device-inference',
+    title: 'On-device AI, ML Kit và inference',
+    category: 'Mobile AI',
+    phase: 3,
+    month: 8,
+    prerequisites: ['android-system-design'],
+    relatedDocs: ['/performance/profiling', '/security/security-model'],
+    quizTopics: [],
+    resources: [
+      ai,
+      {
+        label: 'ML Kit pose detection Android',
+        url: 'https://developers.google.com/ml-kit/vision/pose-detection/android',
+      },
+    ],
+    objectives: [
+      'So sánh local/cloud theo latency, privacy và device support.',
+      'Đo inference warm/cold, missing landmark và memory trên thiết bị thật.',
+    ],
+    theory: [
+      'Chọn runtime theo bài toán: ML Kit cho tác vụ dựng sẵn, MediaPipe cho pipeline media, LiteRT khi cần custom model. Model file, preprocessing, delegate và device capability đều thuộc version contract.',
+      'Pose detector trả landmark và confidence, không tự hiểu mục tiêu tập luyện. Thiếu điểm hoặc bị che khuất phải là trạng thái unknown. Delegate nhanh trên một máy không bảo đảm nhanh trên mọi máy; cần fallback và phép đo thermal/latency.',
+    ],
+    code: 'data class Landmark(val x: Float, val y: Float, val confidence: Float)\nfun usable(p: Landmark?, threshold: Float): Boolean =\n  p != null && p.x.isFinite() && p.y.isFinite() &&\n    p.confidence.isFinite() && p.confidence >= threshold',
+    behavior:
+      'Guard độc lập với runtime. threshold là cấu hình cần đánh giá trên dataset; không phải chứng nhận độ chính xác.',
+    practice: 'Benchmark pose detector',
+    context: 'Chọn sample ML Kit chính thức và một bộ clip được phép sử dụng.',
+    steps: [
+      'Pin SDK/model version, ghi thiết bị và preprocessing.',
+      'Đo cold/warm latency, RAM và missing landmark.',
+      'Thêm unsupported-device/model-load failure fallback.',
+    ],
+    constraints:
+      'Không suy luận độ chính xác từ một clip; không coi coordinate 2D là đo 3D chính xác.',
+    expected: 'Có báo cáo device matrix và UX unknown khi thiếu dữ liệu.',
+    verification: 'Lưu raw measurement, fixture missing data và version manifest.',
+    challenge: 'So sánh hai runtime trên cùng preprocessing và dataset.',
+    challengeExpected: 'Báo quality/latency trade-off và giới hạn so sánh.',
+    criteria: [
+      'Version/device manifest đầy đủ.',
+      'Missing/low confidence được xử lý.',
+      'Benchmark có dữ liệu gốc và fallback.',
+    ],
+    followUp: 'Chạy trên máy yếu hoặc khi thermal throttling.',
+    reviewQuestions: [
+      'Confidence có phải xác suất đúng đã hiệu chuẩn?',
+      'Đổi preprocessing có thể phá model thế nào?',
+    ],
+  }),
+  lesson({
+    id: 'media-pose-pipeline',
+    title: 'Media processing: frame và pose',
+    category: 'Mobile AI',
+    phase: 3,
+    month: 8,
+    prerequisites: ['on-device-inference'],
+    relatedDocs: [
+      '/android-core/state-recovery',
+      '/performance/memory',
+      '/interview/system-design',
+    ],
+    quizTopics: [],
+    resources: [
+      {label: 'Media3 ExoPlayer', url: 'https://developer.android.com/media/media3/exoplayer'},
+      {
+        label: 'MediaPipe Pose Landmarker Android',
+        url: 'https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/android',
+      },
+    ],
+    objectives: [
+      'Giữ timestamp và coordinate transform nhất quán qua decode/infer/render.',
+      'Giới hạn buffers và giải phóng tài nguyên khi cancel.',
+    ],
+    theory: [
+      'Playback và frame extraction phục vụ mục tiêu khác nhau. Seek không luôn trả đúng frame ở timestamp yêu cầu; lưu timestamp thực, orientation và sampling policy. Quyền URI có thể hết; phục hồi phải xử lý mất access.',
+      'Pose overlay cần transform từ input crop/rotation sang viewport có letterbox. Pipeline file và live có chính sách backpressure khác nhau. Resource native phải đóng theo owner, kể cả khi inference lỗi.',
+    ],
+    code: 'data class Sample(val requestedMs: Long, val actualMs: Long)\nfun monotonic(samples: List<Sample>): Boolean =\n  samples.zipWithNext().all { (a, b) -> b.actualMs > a.actualMs }',
+    behavior:
+      'Kiểm tra timestamp tăng nghiêm ngặt, không chứng minh sampling chính xác. Decoder và image cleanup cần triển khai trong Android project.',
+    practice: 'Trích frame và overlay pose',
+    context: 'Video landscape/portrait, có clip variable frame rate.',
+    steps: [
+      'Persist URI policy và metadata; mở playback bằng Media3.',
+      'Sample bounded, lưu timestamp thực và inference results.',
+      'Áp dụng rotation/crop/letterbox transform; test cancel/error.',
+    ],
+    constraints: 'Không load mọi Bitmap; không assume fixed FPS hoặc mọi frame có pose.',
+    expected: 'Overlay đúng orientation, bounded memory, missing frame có trạng thái.',
+    verification: 'Golden coordinate tests, timestamp tests và trace cancel với buffer count.',
+    challenge: 'Thêm video quay camera trước có mirror.',
+    challengeExpected: 'Transform được ghi rõ và test overlay với landmark fixture.',
+    criteria: [
+      'Timestamp/transform tests.',
+      'Resource cleanup ở mọi exit path.',
+      'Mất URI và missing pose có fallback.',
+    ],
+    followUp: 'Thay aspect ratio và kiểm tra lại transform.',
+    reviewQuestions: [
+      'Vì sao pose bị lệch dù detector đúng?',
+      'Có thể suy timestamp chỉ bằng frameIndex/FPS?',
+    ],
+  }),
+  lesson({
+    id: 'backend-data',
+    title: 'Backend APIs và databases cho AI jobs',
+    category: 'Backend Engineering',
+    phase: 3,
+    month: 9,
+    prerequisites: ['tool-calling', 'offline-sync'],
+    relatedDocs: ['/data/retrofit', '/data/offline-first', '/security/security-model'],
+    quizTopics: ['data'],
+    objectives: [
+      'Thiết kế job API retry-safe với ownership.',
+      'Mô hình hóa unique constraints, pagination và retention.',
+    ],
+    theory: [
+      'Job dài cần durable ID và state machine queued/running/succeeded/failed, tách request lifetime khỏi execution lifetime. POST retry phải dùng idempotency key và bind payload hash để phát hiện tái sử dụng sai.',
+      'Database transaction bảo vệ invariant local server; queue delivery thường đòi consumer idempotent. Tenant filtering phải ở mọi read/write. Video lớn nên lưu object storage với access policy; DB giữ metadata, retention và deletion state.',
+    ],
+    code: 'enum class JobStatus { QUEUED, RUNNING, SUCCEEDED, FAILED }\ndata class Job(val id: String, val accountId: String, val status: JobStatus)\nfun visible(job: Job, accountId: String) = job.accountId == accountId',
+    behavior:
+      'Domain illustration bằng Kotlin; production authorization cần server enforcement và transactional updates, không chỉ client filter.',
+    practice: 'Thiết kế API tạo analysis job',
+    context: 'Fake backend lưu metadata và mô phỏng queue redelivery.',
+    steps: [
+      'Viết contract POST /jobs và GET /jobs/{id}, auth/error schema.',
+      'Đặt unique(account,idempotencyKey) và payload hash.',
+      'Test duplicate submit, queue redelivery, cross-account và delete.',
+    ],
+    constraints: 'Không public video URL mặc định; bounded pagination; log không chứa token.',
+    expected: 'Một logical job qua retries, account khác không đọc được.',
+    verification: 'Contract tests, migration SQL và race test hai submit đồng thời.',
+    challenge: 'Xóa video khi job đang chạy.',
+    challengeExpected: 'Có retention/deletion state và test race với worker.',
+    criteria: [
+      'Idempotency transaction có test.',
+      'Ownership và pagination enforce ở server.',
+      'Job lifecycle/retention có contract.',
+    ],
+    followUp: 'Inject crash sau DB commit trước enqueue.',
+    reviewQuestions: [
+      'Vì sao SELECT rồi INSERT có race?',
+      'Xóa DB row có xóa được object/video backup?',
+    ],
+  }),
+  lesson({
+    id: 'ai-evaluation',
+    title: 'AI evaluation, reliability và movement analysis',
+    category: 'AI Engineering',
+    phase: 3,
+    month: 9,
+    prerequisites: ['media-pose-pipeline', 'backend-data'],
+    relatedDocs: ['/testing/test-strategy', '/real-world/analytics', '/performance/profiling'],
+    quizTopics: ['testing'],
+    objectives: [
+      'Tạo dataset version hóa có case occlusion và thiếu dữ liệu.',
+      'Đánh giá false feedback, latency và abstention theo nhóm tình huống.',
+    ],
+    theory: [
+      'Movement analysis cần định nghĩa metric, normalization và temporal smoothing trước khi tạo ngôn ngữ feedback. LLM không nên bịa góc khớp hoặc phát hiện từ frame không có landmark đáng tin.',
+      'Tách golden deterministic tests khỏi model evaluation. Eval set cần giữ khỏi tuning; báo mẫu số, failure slices và data consent. Threshold thay đổi phải so quality/coverage vì abstention nhiều có thể làm accuracy nhìn cao hơn.',
+    ],
+    code: 'data class Eval(val correct: Int, val answered: Int, val total: Int)\nfun precision(e: Eval): Double? =\n  if (e.answered == 0) null else e.correct.toDouble() / e.answered\nfun coverage(e: Eval): Double? =\n  if (e.total == 0) null else e.answered.toDouble() / e.total',
+    behavior:
+      'Ví dụ minh họa precision và coverage cho nhãn đúng/sai đã có ground truth; null thể hiện chưa có dữ liệu, không dựng điểm 0%.',
+    practice: 'Eval movement feedback',
+    context: 'Clip có nhãn tham chiếu, góc quay và occlusion được mô tả.',
+    steps: [
+      'Định nghĩa movement metric và confidence/unknown policy.',
+      'Tạo fixture clip metadata, ground truth và dataset version.',
+      'Đo quality, coverage, latency theo slice; thử threshold khác.',
+    ],
+    constraints:
+      'Không tuyên bố chẩn đoán y khoa; không dùng training/tuning set làm held-out eval.',
+    expected: 'Feedback chỉ dựa dữ liệu có provenance; unknown được báo rõ.',
+    verification: 'Nộp eval script, raw results, dataset manifest và regression gate.',
+    challenge: 'Model mới tốt trung bình nhưng xấu ở low light.',
+    challengeExpected: 'Gate theo critical slice và quyết định rollout có lý do.',
+    criteria: [
+      'Dataset và provenance version hóa.',
+      'Precision/coverage/latency có mẫu số.',
+      'Unknown và regression slices được test.',
+    ],
+    followUp: 'Thử trên held-out clip chưa dùng khi tuning.',
+    reviewQuestions: ['Vì sao accuracy tăng khi bỏ qua case khó?', 'LLM-as-judge có giới hạn gì?'],
+  }),
+];
