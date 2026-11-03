@@ -1,6 +1,10 @@
 import React, {useState, useEffect, useCallback, useRef} from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
+import {useLocation} from '@docusaurus/router';
+import {useProgressStore, newId} from '../hooks/useLearningProgress';
+import {questionsForLesson, quizRecord} from '../services/learning/quizMapping.mjs';
+import {lessonById, lessonPath} from '../data/learning/roadmap.mjs';
 import {ALL_QUESTIONS, TOPICS} from '../data/quizQuestions.mjs';
 import {filterQuestions, prepareSession, calculatePoints, accuracy} from '../utils/quiz.mjs';
 
@@ -21,6 +25,12 @@ function StudyLink({question}) {
 }
 
 export default function QuizPage() {
+  const location = useLocation();
+  const learning = useProgressStore();
+  const [lessonId, setLessonId] = useState(null);
+  const [reviewWrong, setReviewWrong] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const sessionId = useRef(null);
   const [screen, setScreen] = useState('home');
   const [selectedTopic, setSelectedTopic] = useState('all');
   const [selectedLevel, setSelectedLevel] = useState('all');
@@ -36,7 +46,16 @@ export default function QuizPage() {
   const questionRef = useRef(null);
   const resultRef = useRef(null);
 
-  const pool = filterQuestions(ALL_QUESTIONS, selectedTopic, selectedLevel);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('lesson');
+    setLessonId(lessonById[id] ? id : null);
+    setReviewWrong(params.get('review') === 'wrong');
+  }, [location.search]);
+  const incorrectIds = new Set(learning.data.quizzes.flatMap(q => q.answers.filter(a => !a.correct).map(a => a.questionId)));
+  const relevant = lessonId ? questionsForLesson(lessonId) : ALL_QUESTIONS;
+  const pool = reviewWrong ? relevant.filter(q => incorrectIds.has(q.id))
+    : lessonId ? relevant : filterQuestions(ALL_QUESTIONS, selectedTopic, selectedLevel);
   const currentQ = questions[currentIdx];
   const currentAnswer = answers[currentIdx];
   const totalQ = questions.length;
@@ -52,6 +71,8 @@ export default function QuizPage() {
     const prepared = prepareSession(questionPool, retry ? questionPool.length : questionCount);
     if (!prepared.length) return;
     answeredRef.current = false;
+    sessionId.current = newId();
+    setSaved(false);
     setQuestions(prepared);
     setCurrentIdx(0);
     setAnswers([]);
@@ -93,6 +114,8 @@ export default function QuizPage() {
   const goNext = () => {
     if (!currentAnswer) return;
     if (currentIdx + 1 === totalQ) {
+      const record = quizRecord(answers, {id: sessionId.current, at: new Date().toISOString(), mode: sessionMode, lessonId});
+      setSaved(learning.update(state => ({...state, quizzes: state.quizzes.some(q => q.id === record.id) ? state.quizzes : [...state.quizzes, record]})));
       setScreen('result');
       return;
     }
@@ -115,6 +138,8 @@ export default function QuizPage() {
   return (
     <Layout title="Android Quiz" description="Ôn phỏng vấn Android từ nền tảng đến tình huống Senior, có lời giải và bài đọc liên quan">
       <div className="quiz-root">
+        {learning.error && <p className="alert alert--warning" role="alert">Không lưu được lịch sử học tập: {learning.error} <Link to="/learn/settings">Sao lưu / khôi phục</Link></p>}
+        {(lessonId || reviewWrong) && <div className="alert alert--info"><p>{lessonId ? `Quiz cho bài: ${lessonById[lessonId].title}` : 'Ôn các câu đã trả lời sai trong lịch sử.'} {reviewWrong && lessonId && 'Chỉ gồm câu đã trả lời sai.'}</p>{lessonId && <Link to={lessonPath(lessonId)}>← Trở về bài học</Link>} <button type="button" className="button button--secondary button--sm" disabled={screen === 'playing'} onClick={() => { setLessonId(null); setReviewWrong(false); restartHome(); }}>Dùng toàn bộ ngân hàng</button></div>}
         {screen === 'home' && (
           <div className="quiz-home">
             <div className="quiz-home-hero">
@@ -132,11 +157,13 @@ export default function QuizPage() {
               <div className="quiz-stat-card"><span className="quiz-stat-num">{ALL_QUESTIONS.filter(q => q.level === 'senior').length}</span><span className="quiz-stat-label">Tình huống Senior</span></div>
             </div>
             <div className="quiz-settings">
+              {!lessonId && !reviewWrong && <>
               <label>Bộ câu hỏi
                 <select value={selectedLevel} onChange={event => setSelectedLevel(event.target.value)}>
                   {LEVELS.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
                 </select>
               </label>
+              </>}
               <label>Chế độ
                 <select value={mode} onChange={event => setMode(event.target.value)}>
                   <option value="practice">Ôn tập · Không giới hạn giờ</option>
@@ -152,7 +179,7 @@ export default function QuizPage() {
             <p className="quiz-session-note">
               {mode === 'practice' ? 'Đọc kỹ tình huống, trả lời và xem giải thích theo tốc độ của bạn.' : '20 giây/câu gốc · 60 giây/tình huống Senior. Đúng nhanh có thêm điểm, mỗi chuỗi 3 câu đúng thưởng 5 điểm.'}
             </p>
-            <h2 className="quiz-section-title">Chọn chủ đề</h2>
+            {!lessonId && !reviewWrong && <><h2 className="quiz-section-title">Chọn chủ đề</h2>
             <div className="quiz-topics-grid">
               {TOPICS.map(topic => {
                 const count = filterQuestions(ALL_QUESTIONS, topic.id, selectedLevel).length;
@@ -165,7 +192,7 @@ export default function QuizPage() {
                   </button>
                 );
               })}
-            </div>
+            </div></>}
             <p className="quiz-session-note" role="status">
               {pool.length ? `Lượt này gồm ${Math.min(questionCount, pool.length)} câu ngẫu nhiên từ ${pool.length} câu phù hợp.` : 'Chưa có câu hỏi trong bộ lọc này. Hãy chọn chủ đề hoặc bộ câu hỏi khác.'}
             </p>
@@ -241,6 +268,7 @@ export default function QuizPage() {
               <div className="quiz-result-stat"><span className="quiz-result-stat-num">{fastest.length ? `${Math.min(...fastest.map(answer => answer.elapsed))}s` : '—'}</span><span>Câu đúng nhanh nhất</span></div>
             </div>
             <p className="quiz-session-note">Tỷ lệ đúng tính theo số câu, độc lập với tốc độ và điểm thưởng.</p>
+            <p className="quiz-session-note">{saved ? 'Đã lưu lịch sử học tập.' : 'Lịch sử chưa được lưu.'} Quiz không tự xác nhận kỹ năng đạt hoặc vững. <Link to="/learn/skills">Xem kỹ năng và câu sai →</Link></p>
             <div className="quiz-topic-results">
               <h2 className="quiz-section-title">Kết quả theo chủ đề</h2>
               <ul>{TOPICS.filter(topic => topic.id !== 'all').map(topic => {

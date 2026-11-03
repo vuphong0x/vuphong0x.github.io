@@ -13,11 +13,12 @@ npm start
 
 ```bash
 npm run test:quiz
+npm run test:learning
 npm run build
 npm run serve
 ```
 
-`build/` là artifact website tĩnh. `npm run build` tự chạy kiểm tra quiz qua `prebuild`, rồi build với kiểm tra broken internal links/Markdown links. GitHub Actions dùng cùng lệnh build và deploy Pages từ `main`. Thay đổi local chưa tự xuất hiện trên website công khai.
+`build/` là artifact website tĩnh. `npm run build` tự chạy kiểm tra quiz và learning qua `prebuild`, rồi build với kiểm tra broken internal links/Markdown links. GitHub Actions dùng cùng lệnh build và deploy Pages từ `main`. Thay đổi local chưa tự xuất hiện trên website công khai.
 
 ## Nội dung và quiz
 
@@ -27,7 +28,7 @@ npm run serve
 - `src/utils/quiz.mjs`: bộ lọc, randomization và scoring.
 - `scripts/quiz.test.mjs`: kiểm tra ID/đáp án, bài đọc/anchor, bộ lọc, đảo lựa chọn, retry và tỷ lệ đúng.
 
-Practice mode không đếm giờ; challenge mode có 20 giây/câu gốc và 60 giây/tình huống Senior. Tỷ lệ đúng độc lập với điểm thưởng. Tiến độ nằm trong memory của trang và reset khi reload; bài đọc mở tab mới để không làm gián đoạn quiz.
+Practice mode không đếm giờ; challenge mode có 20 giây/câu gốc và 60 giây/tình huống Senior. Tỷ lệ đúng độc lập với điểm thưởng. Phiên đang làm reset khi reload; lịch sử phiên đã hoàn tất được lưu trong localStorage và có thể xem ở `/learn/skills`. Bài đọc mở tab mới để không làm gián đoạn quiz.
 
 Tìm kiếm local hỗ trợ tiếng Việt và tiếng Anh. Tài liệu dùng sidebar tự sinh, nên bài mới được đưa vào đúng thư mục/chủ đề.
 
@@ -36,3 +37,7 @@ Tìm kiếm local hỗ trợ tiếng Việt và tiếng Anh. Tài liệu dùng s
 Nêu vấn đề, cơ chế, giả định, tradeoff/failure case và cách kiểm chứng. Ưu tiên nguồn chính thức; kiểm tra version/target SDK trước các khẳng định về platform hoặc thư viện. Ví dụ Kotlin phải nêu dependency/type giả định và phần chưa triển khai, giữ cancellation/ownership đúng và không đưa credential thật vào mẫu.
 
 Website là tài liệu học và đề thực hành, không chứa một Android app hoàn chỉnh. Build Docusaurus và test quiz không chứng minh các ví dụ Android đã được compile/run trên thiết bị; người học cần setup project và thực hiện ma trận test của bài tương ứng. Điểm quiz/rubric không chứng nhận cấp bậc nghề nghiệp.
+
+## Learning platform
+
+The native `/learn` section adds a twelve-month Android → Senior → Mobile AI roadmap, 24 structured lessons, eight capstone milestones, evidence-based self-assessment, review scheduling, quiz history, a journal and browser-local JSON backups. See [LEARNING_PLATFORM.md](./LEARNING_PLATFORM.md) for architecture, scoring rules, storage schema, migration limits and verification commands.

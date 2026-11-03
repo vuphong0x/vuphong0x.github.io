@@ -18,6 +18,8 @@ const config = {
   projectName: 'vuphong0x.github.io',
   deploymentBranch: 'gh-pages',
 
+  plugins: ['./plugins/learning/index.cjs'],
+
   onBrokenLinks: 'throw',
 
   markdown: {
@@ -84,6 +86,7 @@ themes: [
       src: 'img/logo.svg',
     },
     items: [
+      {to: '/learn', label: 'Học tập', position: 'left'},
       {
         type: 'docSidebar',
         sidebarId: 'knowledgeSidebar',
